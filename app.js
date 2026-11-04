@@ -135,7 +135,8 @@ function addSkillRow(name = "", lvl = "untrained") {
   const ogAdv  = document.createElement("optgroup"); ogAdv.label  = "Продвинутые";
   for (const s of SKILLS) {
     const o = document.createElement("option");
-    o.value = s.name; o.textContent = s.name;
+    const char = CHARS.find(x => x.key === s.char);
+    o.value = s.name; o.textContent = `${s.name} [${char ? char.abbr : "?"}]`;
     o.dataset.type = s.type; o.dataset.char = s.char;
     (s.type === "b" ? ogBase : ogAdv).appendChild(o);
   }
@@ -146,9 +147,10 @@ function addSkillRow(name = "", lvl = "untrained") {
   lvlSel.dataset.key = sel.dataset.key + "_lvl";
   lvlSel.className = "sk-lvl";
   lvlSel.innerHTML =
+    `<option value="basic">Базовое</option>` +
     `<option value="untrained">Без обучения</option>` +
-    `<option value="trained">Обучено (+10)</option>` +
-    `<option value="mastery">Владение (+20)</option>`;
+    `<option value="trained">Обучено +10</option>` +
+    `<option value="mastery">Владение +20</option>`;
 
   const charTd = document.createElement("td"); charTd.className = "muted";
   const goalTd = document.createElement("td"); goalTd.className = "goal";
@@ -172,12 +174,15 @@ function calcSkillRow(tr) {
   const charTd = tr.children[1], goalTd = tr.children[3];
   if (!opt || !opt.dataset.char) { charTd.textContent = ""; goalTd.textContent = "—"; return; }
   charTd.textContent = CHARS.find(x => x.key === opt.dataset.char).abbr;
-  const base = getVal(opt.dataset.char);
+  const base = getVal(opt.dataset.char) +
+    charFixes(opt.dataset.char).reduce((sum, fix) => sum + fix.v, 0);
   let mod = 0, tag = "";
-  if (selLvl.value === "trained") { mod = 10; tag = "обучено +10"; }
+  let target = base;
+  if (selLvl.value === "basic") { target = Math.floor(base / 2); tag = "базовое"; }
+  else if (selLvl.value === "untrained") { tag = "без обучения (0)"; }
+  else if (selLvl.value === "trained") { mod = 10; tag = "обучено +10"; }
   else if (selLvl.value === "mastery") { mod = 20; tag = "владение +20"; }
-  else if (opt.dataset.type === "a") { mod = -20; tag = "без формы −20"; }
-  goalTd.textContent = base ? `${base + mod} ${tag}` : "—";
+  goalTd.textContent = base ? `${target + mod} ${tag}` : "—";
 }
 
 /* ---------- таланты ---------- */
