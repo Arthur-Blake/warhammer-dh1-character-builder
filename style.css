@@ -1,0 +1,112 @@
+:root{
+  --bg:#141210; --card:#1e1a15; --ink:#e8dcc0; --muted:#9a8c72;
+  --gold:#c9a227; --dim:#3a3229; --accent:#7f1d1d; --ok:#5c8a54;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font:15px/1.45 Georgia,"Times New Roman",serif;
+}
+header{
+  padding:14px 24px; background:linear-gradient(#241e18,#141210);
+  border-bottom:1px solid var(--dim); display:flex; flex-wrap:wrap;
+  align-items:center; gap:16px; justify-content:space-between;
+}
+h1{font-size:20px; letter-spacing:2px; color:var(--gold); margin:0; font-variant:small-caps}
+h2{
+  grid-column:1/-1; margin:0 0 10px; font-variant:small-caps; letter-spacing:1px;
+  color:var(--gold); font-size:16px; border-bottom:1px solid var(--dim); padding-bottom:6px;
+  display:flex; align-items:center; gap:10px;
+}
+h2 .hint{font-size:10.5px; color:var(--muted); font-weight:normal; letter-spacing:0}
+main{max-width:1080px; margin:18px auto; padding:0 16px; display:grid; gap:16px}
+.card{
+  background:var(--card); border:1px solid var(--dim); border-radius:8px;
+  padding:16px 18px 18px; box-shadow:0 2px 10px #0007;
+}
+.toolbar{display:flex; gap:8px; align-items:center}
+button{
+  font:inherit; background:#2a231c; color:var(--ink); border:1px solid var(--dim);
+  border-radius:5px; padding:5px 12px; cursor:pointer;
+}
+button:hover{border-color:var(--gold); color:var(--gold)}
+button.accent{background:var(--accent); border-color:#a23030}
+button.roll{padding:2px 8px}
+.grid-4{display:grid; grid-template-columns:repeat(4,1fr); gap:10px}
+.grid-4 label{display:flex; flex-direction:column; gap:3px; font-size:12.5px; color:var(--muted)}
+.grid-4 input,.grid-4 select,textarea{
+  font:inherit; color:var(--ink); background:#141110; border:1px solid var(--dim);
+  border-radius:4px; padding:5px 8px; width:100%;
+}
+.inline{display:flex; gap:6px; align-items:center}
+.derived-box{
+  border:1px solid var(--dim); background:#141110; border-radius:4px;
+  padding:6px 8px; min-height:30px; color:var(--ink);
+}
+.muted{color:var(--muted); font-size:12px}
+
+/* панель справки */
+#hint-box{font-size:14px}
+.hgroup h3{
+  margin:10px 0 4px; font-variant:small-caps; letter-spacing:1px; color:var(--gold);
+  border-bottom:1px dashed var(--dim);
+}
+.hgroup ul{margin:4px 0 8px 18px; padding:0}
+.hgroup li{margin:3px 0}
+.hgroup i{color:var(--muted); font-style:italic}
+.kit{
+  margin-top:12px; border:1px dashed var(--dim); border-radius:6px;
+  padding:10px 12px; font-size:13px; white-space:pre-wrap;
+}
+.kit-2col{display:grid; grid-template-columns:1.1fr 1fr; gap:4px 24px}
+.kit-col{min-width:0}
+.kit-title{
+  font-variant:small-caps; letter-spacing:1px; color:var(--gold);
+  border-bottom:1px dashed var(--dim); margin-bottom:6px; padding-bottom:2px;
+}
+.kit-toggle{
+  width:100%; display:flex; justify-content:space-between; align-items:center;
+  background:transparent; border:none; border-bottom:1px dashed var(--dim);
+  padding:0 0 6px; margin:0 0 6px; color:var(--gold);
+  font:inherit; font-variant:small-caps; letter-spacing:1px;
+  cursor:pointer; text-align:left; white-space:normal;
+}
+.kit-toggle:hover{color:var(--ink); border-bottom-color:var(--gold)}
+.kit-toggle-arrow{color:var(--muted); font-size:12px; margin-left:8px}
+.kit-body{white-space:pre-wrap}
+.kit-body.collapsed,.kit-body[hidden]{display:none}
+.fixsrc{font-size:11px; color:var(--muted); white-space:normal}
+table{width:100%; border-collapse:collapse}
+th,td{padding:4px 8px; border-bottom:1px solid var(--dim); font-size:14px}
+th{color:var(--muted); font-weight:normal; font-variant:small-caps; text-align:left}
+.tbl-chars td input{width:70px; background:#141110; border:1px solid var(--dim);
+  border-radius:4px; padding:3px 6px; color:var(--ink); font:inherit}
+.tbl-chars .val,.tbl-chars .bon{font-size:16px; color:var(--gold)}
+.tbl-rows select,input[type=text],textarea{
+  background:#141110; border:1px solid var(--dim); border-radius:4px; color:var(--ink);
+  padding:3px 6px; font:inherit; width:100%;
+}
+td.del button{padding:1px 8px}
+.hidden{display:none}
+footer{padding:16px; text-align:center}
+
+/* мобильная версия */
+@media (max-width:760px){
+  .grid-4{grid-template-columns:repeat(2,1fr)}
+  .kit-2col{grid-template-columns:1fr}
+  .fixsrc{display:block}      /* узкий экран: разбор переносится под значение */
+}
+
+/* печать: светлая тема */
+@media print{
+  body{background:#fff; color:#111}
+  .card{background:#fff; border:1px solid #999; box-shadow:none}
+  header .toolbar, button{display:none}
+  .derived-box, input, select, textarea{
+    background:#fff !important; color:#111 !important; border-color:#bbb;
+  }
+  h1,h2,.tbl-chars .val,.tbl-chars .bon{color:#111}
+  th{color:#444}
+  .kit-title,.fixsrc{color:#555}
+  .kit-body{display:block !important}
+}

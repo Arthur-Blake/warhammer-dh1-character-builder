@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Лист персонажа — Dark Heresy (1 изд.)</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>◈ Лист персонажа — Dark Heresy ◈</h1>
+  <div class="toolbar">
+    <button id="btn-export" title="Экспорт XML">⬇ XML</button>
+    <button id="btn-import" title="Импорт XML">⬆ XML</button>
+    <input type="file" id="file-import" accept=".xml" hidden>
+    <button id="btn-print">🖨 Печать</button>
+    <button id="btn-reset" title="Очистить лист">🗑 Сброс</button>
+    <span id="save-status" class="muted">автосохранение…</span>
+  </div>
+</header>
+
+<main>
+<!-- АНКЕТА -->
+<section class="card" id="sec-info">
+  <h2>Аколит</h2>
+  <div class="grid-4">
+    <label>Имя<input data-key="name" type="text"></label>
+    <label>Игрок<input data-key="player" type="text"></label>
+    <label>Родной мир
+      <select data-key="world" id="sel-world"><option value="">— выбери —</option></select>
+    </label>
+    <label>Профессия
+      <select data-key="career" id="sel-career"><option value="">— выбери —</option></select>
+    </label>
+    <label>Ранг<input data-key="rank" type="text"></label>
+    <label>Пол<select data-key="sex" id="sel-sex">
+      <option value=""></option><option>М</option><option>Ж</option></select>
+    </label>
+    <label>Возраст<input data-key="age" type="number" min="16" max="400"></label>
+    <label>Приметы<div><input data-key="quirks" type="text" placeholder="шрамы, татуировки…"></div></label>
+  </div>
+  <div id="career-kit" class="kit muted" hidden></div>
+</section>
+
+<!-- ХАРАКТЕРИСТИКИ -->
+<section class="card" id="sec-chars">
+  <h2>Характеристики
+    <button id="btn-roll-chars" class="accent">🎲 Напылить всё (2d10)</button>
+  </h2>
+  <table class="tbl-chars">
+    <thead><tr><th>Характеристика</th><th>Значение</th><th>Улучшения</th><th>Итог</th><th>Бонус</th></tr></thead>
+    <tbody id="chars-tbody"></tbody>
+  </table>
+</section>
+
+<!-- ПРОИЗВОДНЫЕ -->
+<section class="card" id="sec-derived">
+  <h2>Производные параметры</h2>
+  <div class="grid-4">
+    <label>Раны (d5+mod.)
+      <div class="inline"><button class="roll" id="btn-wounds">🎲</button>
+        <input data-key="wounds" type="number" id="wounds" min="1"></div>
+    </label>
+    <label>Очки Судьбы (всего)
+      <div class="inline"><button class="roll" id="btn-fate">🎲 d10</button>
+        <input data-key="fateTotal" type="number" id="fateTotal" min="0"></div>
+    </label>
+    <label>Судьба (осталось)<input data-key="fateLeft" type="number" id="fateLeft" min="0"></label>
+    <label>Передвижение
+      <div id="movement" class="derived-box">—</div>
+    </label>
+    <label>Усталость (макс.)
+      <div id="fatigue" class="derived-box">—</div>
+    </label>
+    <label>Нагрузка (Сил+Вын)
+      <div id="carry" class="derived-box">—</div>
+    </label>
+    <label>Психосилы (Малые)
+      <div id="psy" class="derived-box">—</div>
+      <button class="roll hidden" id="btn-sanction" type="button">🎲 Табл. 1-5: Санкционирование</button>
+    </label>
+    <label>Богатство, Троны
+      <div class="inline"><button class="roll" id="btn-wealth">🎲</button>
+        <input data-key="wealth" type="number" id="wealth" min="0"></div>
+    </label>
+    <label>Опыт (всего)<input data-key="xpTotal" type="number" value="400"></label>
+    <label>Потрачено<input data-key="xpSpent" type="number"></label>
+    <label>Доступно<div id="xpFree" class="derived-box">—</div></label>
+    <label>Безумие<input data-key="insanity" type="number"></label>
+    <label>Порча<input data-key="corruption" type="number"></label>
+  </div>
+</section>
+
+<!-- УМЕНИЯ -->
+<section class="card" id="sec-skills">
+  <h2>Умения
+    <button id="btn-add-skill" class="accent">+ добавить</button>
+    <span class="hint">базовое без обучения = знач. хар-ки; продвинутое без обучения = −20; обучено +10; владение +20</span>
+  </h2>
+  <table class="tbl-rows" id="skills-table">
+    <thead><tr><th>Умение</th><th>Хар-ка</th><th>Уровень</th><th>Цель Теста</th><th></th></tr></thead>
+    <tbody id="skills-tbody"></tbody>
+  </table>
+</section>
+
+<!-- ТАЛАНТЫ -->
+<section class="card" id="sec-talents">
+  <h2>Таланты и способности
+    <button id="btn-add-talent" class="accent">+ добавить</button>
+  </h2>
+  <table class="tbl-rows" id="talents-table">
+    <thead><tr><th style="width:55%">Талант</th><th>Примечание</th><th></th></tr></thead>
+    <tbody id="talents-tbody"></tbody>
+  </table>
+</section>
+
+<!-- ЭКИПИРОВКА -->
+<section class="card" id="sec-gear">
+  <h2>Броня, оружие и имущество</h2>
+  <div class="grid-4 armour">
+    <label>Голова<input data-key="arm-h" placeholder="число"></label>
+    <label>Тело<input data-key="arm-b"></label>
+    <label>Л. рука<input data-key="arm-la"></label>
+    <label>П. рука<input data-key="arm-ra"></label>
+    <label>Л. нога<input data-key="arm-ll"></label>
+    <label>П. нога<input data-key="arm-rl"></label>
+    <label>Штраф Ловк. от брони<input data-key="arm-ag"></label>
+  </div>
+  <table class="tbl-rows weapons">
+    <thead><tr><th>Оружие</th><th>Класс</th><th>Урон</th><th>Тип</th><th>Пен</th><th>Дальн.</th><th>Обойма</th><th>Перез.</th><th>Особое</th><th></th></tr></thead>
+    <tbody id="weapons-tbody"></tbody>
+  </table>
+  <div class="wgrid">
+    <button id="btn-add-weapon" class="accent">+ оружие</button>
+    <label class="full">Имущество<textarea data-key="gear" rows="4" placeholder="стартовое имущество профессии + покупки"></textarea></label>
+  </div>
+</section>
+
+<!-- ПРОЧЕЕ -->
+<section class="card" id="sec-notes">
+  <h2>История, связи и заметки</h2>
+  <label>История<textarea data-key="history" rows="3"></textarea></label>
+  <label>Связи / враги<textarea data-key="contacts" rows="2"></textarea></label>
+  <label>Заметки<textarea data-key="notes" rows="2"></textarea></label>
+</section>
+<!-- СПРАВКА -->
+<section class="card" id="sec-hint">
+  <h2>Краткая справка по листу
+    <button id="btn-hint" class="accent">🔄 Обновить подсказку</button>
+    <span class="hint">строится только по нажатию кнопки</span>
+  </h2>
+  <div id="hint-box" class="muted">
+    Нажми «Обновить подсказку» — здесь соберутся краткие описания добавленных умений, талантов, оружия и снаряжения.
+  </div>
+</section>
+</main>
+
+<footer class="muted">
+  Dark Heresy © Fantasy Flight Games / Games Workshop. Неофициальный фанатский лист для личного пользования.
+</footer>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
