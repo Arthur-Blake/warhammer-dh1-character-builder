@@ -127,9 +127,16 @@ footer{padding:16px; text-align:center}
 
 /* печать: светлая тема */
 @media print{
+  @page{margin:12mm}
   body{background:#fff; color:#111}
-  .card{background:#fff; border:1px solid #999; box-shadow:none}
-  header .toolbar, button{display:none}
+  header{
+    display:block; position:static; width:100%; padding:0 0 8px; margin:0 0 10px;
+    background:none; border-bottom:1px solid #666; break-inside:avoid; page-break-inside:avoid;
+  }
+  header h1{display:block; width:100%; text-align:center; font-size:17pt; letter-spacing:1px}
+  main{max-width:none; margin:0; padding:0; gap:8px}
+  .card{background:#fff; border:1px solid #999; box-shadow:none; break-inside:auto}
+  header .toolbar, button{display:none !important}
   .derived-box, input, select, textarea{
     background:#fff !important; color:#111 !important; border-color:#bbb;
   }
@@ -137,4 +144,6 @@ footer{padding:16px; text-align:center}
   th{color:#444}
   .kit-title,.fixsrc{color:#555}
   .kit-body{display:block !important}
+  h2{break-after:avoid; page-break-after:avoid}
+  tr{break-inside:avoid; page-break-inside:avoid}
 }

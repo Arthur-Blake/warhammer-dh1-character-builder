@@ -18,6 +18,7 @@ const LS_SHEET_KEY = "dh1e-sheet-v1";       // старое локальное �
 let currentCharId = null;                   // id персонажа в SQLite
 let isApplying = false;                     // guard: не сохранять во время apply()
 let sheetDirty = false;                     // пользователь менял лист
+let suppressAutosave = false;               // переход/удаление персонажа
 
 /* ---------- характеристики ---------- */
 const curWorld = () => WORLDS.find(w => w.id === $("#sel-world").value);
@@ -75,6 +76,8 @@ function buildChars() {
     const world = curWorld();
     const mod = world ? world.mods[key] : 0;
     document.querySelector(`input[data-key="base_${key}"]`).value = d10() + d10() + mod;
+    sheetDirty = true;
+    flashSave();
     recalc();
     flash("бросок: 2d10" + fmtMod(mod));
   });
@@ -137,7 +140,7 @@ function recalc() {
     Math.max(0, num($("input[data-key=xpTotal]").value) - num($("input[data-key=xpSpent]").value) - bioCost);
 
   for (const tr of $("#skills-tbody").rows) calcSkillRow(tr);
-  if (sheetDirty) flashSave();   // чистый только что загруженный лист не отправляем
+  if (sheetDirty && !isApplying) flashSave();   // чистый только что загруженный лист не отправляем
 }
 
 /* ---------- умения ---------- */
@@ -429,6 +432,8 @@ const rollAllChars = () => {
     document.querySelector(`input[data-key="base_${c.key}"]`).value = d10() + d10() + mod;
   }
   recalc();
+  sheetDirty = true;
+  flashSave();
   flash(world ? "напыление характеристик (2d10+мод. мира): " + world.name
               : "мир не выбран — модификаторы +0");
 };
@@ -441,12 +446,14 @@ function collect() {
   // Экранирование служебных символов упаковки: \ → \\ , ; → \S , | → \P
   const escField = x => String(x ?? "")
     .replace(/\\/g, "\\\\").replace(/;/g, "\\S").replace(/\|/g, "\\P");
-  const packRows = (tbody, mapFn) => {
+  const packRows = (tbody, mapFn, keepSingleEmpty = false) => {
     const rows = [];
     for (const tr of tbody.rows) {
       const t = mapFn(tr).map(escField);
       if (t.some(x => x.trim() !== "")) rows.push(t.join("|"));
     }
+    if (keepSingleEmpty && !rows.length && tbody.rows.length === 1)
+      rows.push(mapFn(tbody.rows[0]).map(escField).join("|"));
     return rows.join(";");
   };
   data.__skills = packRows($("#skills-tbody"),
@@ -455,11 +462,12 @@ function collect() {
     tr => [tr.children[0].lastChild.value, tr.children[1].firstChild.value, tr.dataset.src || "manual"]);
   data.bioId = $("#sel-bio").value;
   data.__weapons = packRows($("#weapons-tbody"),
-    tr => Array.from(tr.children).slice(0, 9).map(td => td.firstChild.value));
+    tr => Array.from(tr.children).slice(0, 9).map(td => td.firstChild.value), true);
   return data;
 }
 
 function apply(data) {
+  const wasApplying = isApplying;
   isApplying = true;
   try {
     $("#skills-tbody").innerHTML = "";
@@ -508,17 +516,18 @@ function apply(data) {
     recalc();
     updateBioStatus();
   } finally {
-    isApplying = false;
+    isApplying = wasApplying;
   }
 }
 
 /* ---------- сохранение / XML ---------- */
 let saveTimer;
+let saveInFlight = null;
 function flash(msg) { $("#save-status").textContent = msg; }
 
 function renderCharList(chars) {
   const sel = $("#char-list");
-  sel.innerHTML = '<option value="">— выбрать персонажа —</option>';
+  sel.innerHTML = `<option value=""${chars.length ? " hidden" : ""}>— выбрать персонажа —</option>`;
   for (const c of chars) {
     const opt = document.createElement("option");
     opt.value = c.id;
@@ -526,6 +535,13 @@ function renderCharList(chars) {
     sel.appendChild(opt);
   }
   if (currentCharId) sel.value = currentCharId;
+  else if (chars.length) sel.selectedIndex = -1;
+  syncDeleteButton();
+}
+
+function syncDeleteButton() {
+  const button = $("#btn-delete-character");
+  if (button) button.disabled = !currentCharId;
 }
 
 function updateCharListOption(id, name) {
@@ -537,23 +553,33 @@ function updateCharListOption(id, name) {
     sel.appendChild(opt);
   }
   opt.textContent = `#${id} ${name || "Безымянный"}`;
+  const placeholder = sel.querySelector('option[value=""]');
+  if (placeholder) placeholder.hidden = true;
+  sel.value = String(id);
 }
 
 async function loadCharList() {
   try {
     const r = await fetch(`${API_PREFIX}/characters`);
     if (!r.ok) throw new Error(r.status);
-    renderCharList(await r.json());
+    const chars = await r.json();
+    renderCharList(chars);
+    return chars;
   } catch (e) {
     flash("не удалось загрузить список персонажей");
+    return null;
   }
 }
 
 async function loadCharacter(id) {
+  const wasSuppressingAutosave = suppressAutosave;
+  suppressAutosave = true;
+  clearTimeout(saveTimer);
   try {
     const r = await fetch(`${API_PREFIX}/characters/${id}`);
     if (!r.ok) throw new Error(r.status);
     const rec = await r.json();
+    sheetDirty = false;
     isApplying = true;
     apply(rec.data);
     isApplying = false;
@@ -561,57 +587,160 @@ async function loadCharacter(id) {
     try { localStorage.setItem(LS_ID_KEY, currentCharId); } catch (e) {}
     $("#char-list").value = currentCharId;
     sheetDirty = false;
+    syncDeleteButton();
     flash("загружен персонаж");
+    return true;
   } catch (e) {
     flash("не удалось загрузить персонажа");
+    return false;
+  } finally {
+    suppressAutosave = wasSuppressingAutosave;
+    if (!suppressAutosave && sheetDirty) flashSave();
   }
 }
 
 async function saveToServer(force = false) {
-  if (isApplying) return;
-  if (!currentCharId && !sheetDirty && !force) return; // пустой новый лист не спамим
+  if (isApplying || suppressAutosave) return false;
+  if (saveInFlight && !await saveInFlight) return false;
+  if (!currentCharId && !sheetDirty && !force) return true; // пустой новый лист не спамим
+  clearTimeout(saveTimer);
   const data = collect();
+  const previousId = currentCharId;
   flash("сохранение…");
-  try {
-    let r;
-    if (currentCharId) {
-      r = await fetch(`${API_PREFIX}/characters/${currentCharId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (r.status === 404) {
-        // запись исчезла — создаём новую
+  const request = (async () => {
+    try {
+      let r;
+      if (currentCharId) {
+        r = await fetch(`${API_PREFIX}/characters/${currentCharId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        if (r.status === 404) {
+          // запись исчезла — создаём новую
+          r = await fetch(`${API_PREFIX}/characters`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          });
+        }
+      } else {
         r = await fetch(`${API_PREFIX}/characters`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(data),
         });
       }
-    } else {
-      r = await fetch(`${API_PREFIX}/characters`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
+      if (!r.ok) throw new Error(r.status);
+      const rec = await r.json();
+      currentCharId = String(rec.id);
+      if (previousId && previousId !== currentCharId) {
+        const staleOption = $("#char-list").querySelector(`option[value="${CSS.escape(previousId)}"]`);
+        if (staleOption) staleOption.remove();
+      }
+      try { localStorage.setItem(LS_ID_KEY, currentCharId); } catch (e) {}
+      sheetDirty = false;
+      updateCharListOption(currentCharId, data.name || "Безымянный");
+      syncDeleteButton();
+      flash("сохранено " + new Date().toLocaleTimeString("ru"));
+      return true;
+    } catch (e) {
+      flash("Не сохранено (offline?)");
+      return false;
     }
-    if (!r.ok) throw new Error(r.status);
-    const rec = await r.json();
-    currentCharId = String(rec.id);
-    try { localStorage.setItem(LS_ID_KEY, currentCharId); } catch (e) {}
-    sheetDirty = false;
-    updateCharListOption(currentCharId, data.name || "Безымянный");
-    flash("сохранено " + new Date().toLocaleTimeString("ru"));
-  } catch (e) {
-    flash("Не сохранено (offline?)");
+  })();
+  saveInFlight = request;
+  try {
+    return await request;
+  } finally {
+    if (saveInFlight === request) saveInFlight = null;
   }
 }
 
 function flashSave(force = false) {
   clearTimeout(saveTimer);
+  if (suppressAutosave) return;
   saveTimer = setTimeout(() => saveToServer(force), 300);
 }
 const saveSoon = () => flashSave(true);   // программные изменения — явное сохранение
+
+function emptySheetData() {
+  const data = {};
+  for (const el of $$("[data-key]")) {
+    const key = el.dataset.key;
+    if (!/^(sk\d|tl\d|w\d|__)/.test(key)) data[key] = "";
+  }
+  data.xpTotal = "400";
+  data.bioId = "";
+  data.__skills = "|untrained|manual";
+  data.__talents = "||manual";
+  data.__weapons = Array(9).fill("").join("|");
+  return data;
+}
+
+async function deleteCharacter(id) {
+  if (!id) return false;
+  const deletingActive = String(id) === String(currentCharId);
+  let targetId = String(id);
+  const prompt = deletingActive
+    ? "Удалить персонажа из базы вместе с несохранёнными изменениями?"
+    : "Удалить выбранного персонажа из базы?";
+  if (!confirm(prompt)) return false;
+
+  suppressAutosave = true;
+  clearTimeout(saveTimer);
+  try {
+    if (saveInFlight && !await saveInFlight) {
+      flash("не удалось завершить сохранение; персонаж не удалён");
+      return false;
+    }
+    if (deletingActive && currentCharId) targetId = String(currentCharId);
+    const r = await fetch(`${API_PREFIX}/characters/${targetId}`, { method: "DELETE" });
+    if (!r.ok) throw new Error(r.status);
+    if (deletingActive) {
+      currentCharId = null;
+      sheetDirty = false;
+      try {
+        localStorage.removeItem(LS_ID_KEY);
+        localStorage.removeItem(LS_SHEET_KEY);
+      } catch (e) { /* хранилище недоступно */ }
+      apply(emptySheetData());
+    }
+    await loadCharList();
+    syncDeleteButton();
+    flash(deletingActive ? "персонаж удалён; открыт чистый лист" : "персонаж удалён");
+    return true;
+  } catch (e) {
+    flash("не удалось удалить персонажа");
+    return false;
+  } finally {
+    suppressAutosave = false;
+    if (sheetDirty) flashSave();
+  }
+}
+
+async function resetSheet() {
+  if (!confirm("Удалить текущего персонажа из базы и очистить лист? Несохранённые изменения будут потеряны.")) return;
+  suppressAutosave = true;
+  clearTimeout(saveTimer);
+  try {
+    if (saveInFlight) await saveInFlight;
+    if (currentCharId) {
+      const r = await fetch(`${API_PREFIX}/characters/${currentCharId}`, { method: "DELETE" });
+      if (!r.ok) throw new Error(r.status);
+    }
+  } catch (e) {
+    flash("не удалось удалить персонажа; лист не сброшен");
+    suppressAutosave = false;
+    if (sheetDirty) flashSave();
+    return;
+  }
+  try {
+    localStorage.removeItem(LS_ID_KEY);
+    localStorage.removeItem(LS_SHEET_KEY);
+  } catch (e) { /* хранилище недоступно */ }
+  location.reload();
+}
 
 const esc = s => String(s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -905,14 +1034,8 @@ async function init() {
   $("#btn-print").onclick  = () => window.print();
   $("#btn-import").onclick = () => $("#file-import").click();
   $("#file-import").addEventListener("change", e => { if (e.target.files[0]) importXML(e.target.files[0]); e.target.value = ""; });
-  $("#btn-reset").onclick = () => {
-    if (!confirm("Очистить лист? Текущая запись останется в базе; будет создан чистый лист.")) return;
-    try {
-      localStorage.removeItem(LS_ID_KEY);
-      localStorage.removeItem(LS_SHEET_KEY);
-    } catch (e) { /* хранилище недоступно */ }
-    location.reload();
-  };
+  $("#btn-reset").onclick = resetSheet;
+  $("#btn-delete-character").onclick = () => deleteCharacter(currentCharId);
 
   document.addEventListener("input", e => {
     if (e.target.dataset && e.target.dataset.key) {
@@ -925,14 +1048,21 @@ async function init() {
   $("#char-list").addEventListener("change", async () => {
     const id = $("#char-list").value;
     if (!id) return;
-    await saveToServer();
-    await loadCharacter(id);
+    const oldId = currentCharId;
+    if (!await saveToServer()) {
+      $("#char-list").value = oldId || "";
+      if (!oldId) $("#char-list").selectedIndex = -1;
+      return;
+    }
+    if (!await loadCharacter(id)) {
+      $("#char-list").value = oldId || "";
+      if (!oldId) $("#char-list").selectedIndex = -1;
+    }
   });
 
   $("#btn-new-character").onclick = async () => {
-    await saveToServer();
-    const data = collect();
-    data.name = "";                       // новый лист — копия текущего, но без имени
+    if (!await saveToServer()) return;
+    const data = emptySheetData();
     try {
       const r = await fetch(`${API_PREFIX}/characters`, {
         method: "POST",
@@ -943,10 +1073,12 @@ async function init() {
       const rec = await r.json();
       currentCharId = String(rec.id);
       try { localStorage.setItem(LS_ID_KEY, currentCharId); } catch (e) {}
+      sheetDirty = false;
       apply(data);
       await loadCharList();
       $("#char-list").value = currentCharId;
       sheetDirty = false;
+      syncDeleteButton();
       flash("новый персонаж создан");
     } catch (e) {
       flash("не удалось создать персонажа");
@@ -954,7 +1086,7 @@ async function init() {
   };
 
   // Загружаем список персонажей
-  await loadCharList();
+  const initialChars = await loadCharList();
 
   let restored = false;
 
@@ -966,7 +1098,7 @@ async function init() {
   }
 
   // 2) Миграция: база пуста, но есть старое локальное сохранение
-  if (!restored && $("#char-list").options.length <= 1) {
+  if (!restored && initialChars && initialChars.length === 0) {
     try {
       const saved = localStorage.getItem(LS_SHEET_KEY);
       if (saved) {
