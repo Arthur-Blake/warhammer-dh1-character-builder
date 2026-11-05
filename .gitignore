@@ -1,3 +1,5 @@
-*.pdf
 .DS_Store
+*.pdf
 node_modules/
+__pycache__/
+characters.sqlite3

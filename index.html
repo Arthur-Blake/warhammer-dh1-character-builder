@@ -15,6 +15,8 @@
     <input type="file" id="file-import" accept=".xml" hidden>
     <button id="btn-print">🖨 Печать</button>
     <button id="btn-reset" title="Очистить лист">🗑 Сброс</button>
+    <select id="char-list" title="Выбрать персонажа"><option value="">— выбрать персонажа —</option></select>
+    <button id="btn-new-character" title="Создать нового персонажа">＋ Новый персонаж</button>
     <span id="save-status" class="muted">автосохранение…</span>
   </div>
 </header>
@@ -86,6 +88,11 @@
     <label>Опыт (всего)<input data-key="xpTotal" type="number" value="400"></label>
     <label>Потрачено<input data-key="xpSpent" type="number"></label>
     <label>Доступно<div id="xpFree" class="derived-box">—</div></label>
+    <div class="bio-card">
+      <label for="sel-bio">Биография</label>
+      <select id="sel-bio"><option value="">— биография не куплена —</option></select>
+      <div id="bio-status" class="muted">выбери профессию</div>
+    </div>
     <label>Безумие<input data-key="insanity" type="number"></label>
     <label>Порча<input data-key="corruption" type="number"></label>
   </div>
