@@ -7,6 +7,29 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<section id="auth-screen" class="auth-card" aria-labelledby="auth-title">
+  <h1 id="auth-title">◈ Dark Heresy ◈</h1>
+  <p class="muted">Войди в аккаунт или создай новый, чтобы открыть листы персонажей.</p>
+  <div class="auth-tabs" role="tablist" aria-label="Авторизация">
+    <button id="show-login" type="button" class="accent" role="tab" aria-selected="true">Вход</button>
+    <button id="show-register" type="button" role="tab" aria-selected="false">Регистрация</button>
+  </div>
+  <form id="login-form" class="auth-form">
+    <label>Логин<input name="username" type="text" minlength="3" maxlength="32" autocomplete="username" required></label>
+    <label>Пароль<input name="password" type="password" minlength="4" maxlength="20" autocomplete="current-password" required></label>
+    <button type="submit" class="accent">Войти</button>
+  </form>
+  <form id="register-form" class="auth-form" hidden>
+    <label>Логин<input name="username" type="text" minlength="3" maxlength="32" pattern="[A-Za-z0-9_]{3,32}" autocomplete="username" required>
+      <span class="muted">3–32 латинских буквы, цифры или _</span></label>
+    <label>Пароль<input name="password" type="password" minlength="4" maxlength="20" autocomplete="new-password" required>
+      <span class="muted">От 4 до 20 символов</span></label>
+    <button type="submit" class="accent">Создать аккаунт</button>
+  </form>
+  <div id="auth-message" class="auth-message" role="status" aria-live="polite"></div>
+</section>
+
+<div id="app-shell" hidden>
 <header>
   <h1>◈ Лист персонажа — Dark Heresy ◈</h1>
   <div class="toolbar">
@@ -19,6 +42,8 @@
     <button id="btn-new-character" title="Создать нового персонажа">＋ Новый персонаж</button>
     <button id="btn-delete-character" class="accent" title="Удалить выбранного персонажа" disabled>✖ Удалить</button>
     <span id="save-status" class="muted">автосохранение…</span>
+    <span id="signed-in-user" class="muted"></span>
+    <button id="btn-logout" type="button" title="Выйти из аккаунта">Выйти</button>
   </div>
 </header>
 
@@ -166,6 +191,7 @@
 <footer class="muted">
   Dark Heresy © Fantasy Flight Games / Games Workshop. Неофициальный фанатский лист для личного пользования.
 </footer>
+</div>
 
 <script src="data.js"></script>
 <script src="app.js"></script>

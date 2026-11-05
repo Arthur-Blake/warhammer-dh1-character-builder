@@ -12,18 +12,27 @@
 
 import argparse
 import datetime as dt
+import hashlib
+import hmac
 import json
 import mimetypes
 import os
 import re
+import secrets
 import sqlite3
 import sys
 import traceback
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # Каталог проекта — тот, где лежит server.py
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__)) or "."
 DB_PATH = os.path.join(PROJECT_DIR, "characters.sqlite3")
+SESSION_COOKIE = "dh1_session"
+SESSION_DAYS = 30
+PASSWORD_MIN = 4
+PASSWORD_MAX = 20
+PBKDF2_ITERATIONS = 310_000
 
 # Расширения, которые точно стоит отдавать из проекта
 STATIC_EXTENSIONS = {
@@ -34,22 +43,65 @@ STATIC_EXTENSIONS = {
 
 
 def init_db():
-    """Создаёт таблицу персонажей, если её ещё нет."""
+    """Создаёт и обновляет таблицы приложения, если нужно."""
     with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                token_hash TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                expires_at TEXT NOT NULL
+            )
+        """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS characters (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 data TEXT NOT NULL,
                 created_at TEXT,
-                updated_at TEXT
+                updated_at TEXT,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE
             )
         """)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(characters)")}
+        if "user_id" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE")
         conn.commit()
 
 
 def now_iso():
     return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def hash_password(password):
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ITERATIONS)
+    return f"pbkdf2_sha256${PBKDF2_ITERATIONS}${salt.hex()}${digest.hex()}"
+
+
+def verify_password(password, encoded):
+    try:
+        algorithm, iterations, salt_hex, digest_hex = encoded.split("$")
+        if algorithm != "pbkdf2_sha256":
+            return False
+        candidate = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(iterations)
+        ).hex()
+        return hmac.compare_digest(candidate, digest_hex)
+    except (ValueError, TypeError):
+        return False
+
+
+def token_digest(token):
+    return hashlib.sha256(token.encode("ascii")).hexdigest()
 
 
 def read_body(handler):
@@ -61,6 +113,7 @@ def send_json(handler, status, payload):
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Cache-Control", "no-store")
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -127,10 +180,148 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("пустое тело запроса")
         return json.loads(raw.decode("utf-8"))
 
+    def _session_token(self):
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get("Cookie", ""))
+            morsel = cookie.get(SESSION_COOKIE)
+            return morsel.value if morsel else None
+        except Exception:
+            return None
+
+    def _current_user(self):
+        token = self._session_token()
+        if not token or not re.fullmatch(r"[A-Za-z0-9_-]{40,64}", token):
+            return None
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("""
+                SELECT users.id, users.username FROM sessions
+                JOIN users ON users.id = sessions.user_id
+                WHERE sessions.token_hash = ? AND sessions.expires_at > ?
+            """, (token_digest(token), now_iso())).fetchone()
+        return dict(row) if row else None
+
+    def _require_user(self):
+        user = self._current_user()
+        if user is None:
+            send_json(self, 401, {"error": "Требуется авторизация"})
+        return user
+
+    def _set_session_cookie(self, token, max_age):
+        self.send_header(
+            "Set-Cookie",
+            f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}"
+        )
+
+    def _issue_session(self, user):
+        token = secrets.token_urlsafe(32)
+        expires = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=SESSION_DAYS)).isoformat()
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now_iso(),))
+            conn.execute("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
+                         (token_digest(token), user["id"], expires))
+            conn.commit()
+        payload = json.dumps({"user": user}, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self._set_session_cookie(token, SESSION_DAYS * 24 * 60 * 60)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _auth_payload(self):
+        try:
+            payload = self._parse_json()
+        except (json.JSONDecodeError, ValueError, UnicodeDecodeError):
+            send_json(self, 400, {"error": "Невалидный JSON"})
+            return None
+        if not isinstance(payload, dict):
+            send_json(self, 400, {"error": "Ожидались данные формы"})
+            return None
+        return payload
+
+    def _api_register(self):
+        payload = self._auth_payload()
+        if payload is None:
+            return
+        username = str(payload.get("username", "")).strip()
+        password = payload.get("password", "")
+        if not re.fullmatch(r"[A-Za-z0-9_]{3,32}", username):
+            send_json(self, 400, {"error": "Логин: 3–32 латинских буквы, цифры или _"})
+            return
+        if not isinstance(password, str) or not PASSWORD_MIN <= len(password) <= PASSWORD_MAX:
+            send_json(self, 400, {"error": "Пароль должен быть длиной от 4 до 20 символов"})
+            return
+        username = username.lower()
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                first_user = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
+                cursor = conn.execute(
+                    "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
+                    (username, hash_password(password), now_iso())
+                )
+                user = {"id": cursor.lastrowid, "username": username}
+                if first_user:
+                    # Записи из прежней версии без владельца остаются у первого владельца БД.
+                    conn.execute("UPDATE characters SET user_id = ? WHERE user_id IS NULL", (user["id"],))
+                conn.commit()
+        except sqlite3.IntegrityError:
+            send_json(self, 409, {"error": "Такой логин уже занят"})
+            return
+        self._issue_session(user)
+
+    def _api_login(self):
+        payload = self._auth_payload()
+        if payload is None:
+            return
+        username = str(payload.get("username", "")).strip().lower()
+        password = payload.get("password", "")
+        if not isinstance(password, str) or not PASSWORD_MIN <= len(password) <= PASSWORD_MAX:
+            send_json(self, 400, {"error": "Пароль должен быть длиной от 4 до 20 символов"})
+            return
+        if not username:
+            send_json(self, 400, {"error": "Введите логин и пароль"})
+            return
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT id, username, password_hash FROM users WHERE username = ?", (username,)
+            ).fetchone()
+        if not row or not verify_password(password, row["password_hash"]):
+            send_json(self, 401, {"error": "Неверный логин или пароль"})
+            return
+        self._issue_session({"id": row["id"], "username": row["username"]})
+
+    def _api_logout(self):
+        token = self._session_token()
+        if token and re.fullmatch(r"[A-Za-z0-9_-]{40,64}", token):
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_digest(token),))
+                conn.commit()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self._set_session_cookie("", 0)
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(b"{}")
+
     def do_GET(self):
         try:
             if self.path.startswith("/api/"):
-                self._api_get()
+                if self.path == "/api/auth/session":
+                    user = self._require_user()
+                    if user:
+                        send_json(self, 200, {"user": user})
+                elif self.path.startswith("/api/auth/"):
+                    send_json(self, 404, {"error": "Не найдено"})
+                else:
+                    user = self._require_user()
+                    if user:
+                        self._api_get(user["id"])
             else:
                 serve_static(self, self.path)
         except Exception as e:
@@ -140,10 +331,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
-            if self.path == "/api/characters":
-                self._api_create()
+            if self.path == "/api/auth/register":
+                self._api_register()
+            elif self.path == "/api/auth/login":
+                self._api_login()
+            elif self.path == "/api/auth/logout":
+                self._api_logout()
+            elif self.path == "/api/characters":
+                user = self._require_user()
+                if user:
+                    self._api_create(user["id"])
             else:
-                send_text(self, 404, "Not found")
+                send_json(self, 404, {"error": "Не найдено"})
         except Exception as e:
             print(f"[server] ошибка POST {self.path}: {e}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
@@ -151,9 +350,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         try:
+            user = self._require_user()
+            if not user:
+                return
             m = re.match(r"^/api/characters/(\d+)$", self.path)
             if m:
-                self._api_update(int(m.group(1)))
+                self._api_update(int(m.group(1)), user["id"])
             else:
                 send_text(self, 404, "Not found")
         except Exception as e:
@@ -163,9 +365,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         try:
+            user = self._require_user()
+            if not user:
+                return
             m = re.match(r"^/api/characters/(\d+)$", self.path)
             if m:
-                self._api_delete(int(m.group(1)))
+                self._api_delete(int(m.group(1)), user["id"])
             else:
                 send_text(self, 404, "Not found")
         except Exception as e:
@@ -173,22 +378,23 @@ class Handler(BaseHTTPRequestHandler):
             traceback.print_exc(file=sys.stderr)
             send_text(self, 500, "Internal server error")
 
-    def _api_list(self):
+    def _api_list(self, user_id):
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT id, name, updated_at FROM characters ORDER BY updated_at DESC"
+                "SELECT id, name, updated_at FROM characters WHERE user_id = ? ORDER BY updated_at DESC",
+                (user_id,)
             ).fetchall()
         send_json(self, 200, [
             {"id": r["id"], "name": r["name"], "updated_at": r["updated_at"]}
             for r in rows
         ])
 
-    def _api_get_one(self, char_id):
+    def _api_get_one(self, char_id, user_id):
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
-                "SELECT id, name, data FROM characters WHERE id = ?", (char_id,)
+                "SELECT id, name, data FROM characters WHERE id = ? AND user_id = ?", (char_id, user_id)
             ).fetchone()
         if not row:
             send_text(self, 404, "Character not found")
@@ -199,12 +405,12 @@ class Handler(BaseHTTPRequestHandler):
             "data": json.loads(row["data"]),
         })
 
-    def _api_get(self):
+    def _api_get(self, user_id):
         m = re.match(r"^/api/characters/(\d+)$", self.path)
         if m:
-            self._api_get_one(int(m.group(1)))
+            self._api_get_one(int(m.group(1)), user_id)
         elif self.path == "/api/characters":
-            self._api_list()
+            self._api_list(user_id)
         else:
             send_text(self, 404, "Not found")
 
@@ -215,7 +421,7 @@ class Handler(BaseHTTPRequestHandler):
             name = str(data.get("name") or "").strip()
         return name or "Безымянный"
 
-    def _api_create(self):
+    def _api_create(self, user_id):
         try:
             payload = self._parse_json()
         except (json.JSONDecodeError, ValueError) as e:
@@ -227,8 +433,8 @@ class Handler(BaseHTTPRequestHandler):
         data_json = json.dumps(payload, ensure_ascii=False)
         with sqlite3.connect(DB_PATH) as conn:
             cur = conn.execute(
-                "INSERT INTO characters (name, data, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                (name, data_json, ts, ts),
+                "INSERT INTO characters (name, data, created_at, updated_at, user_id) VALUES (?, ?, ?, ?, ?)",
+                (name, data_json, ts, ts, user_id),
             )
             char_id = cur.lastrowid
             conn.commit()
@@ -240,7 +446,7 @@ class Handler(BaseHTTPRequestHandler):
             "updated_at": ts,
         })
 
-    def _api_update(self, char_id):
+    def _api_update(self, char_id, user_id):
         try:
             payload = self._parse_json()
         except (json.JSONDecodeError, ValueError) as e:
@@ -252,8 +458,8 @@ class Handler(BaseHTTPRequestHandler):
         data_json = json.dumps(payload, ensure_ascii=False)
         with sqlite3.connect(DB_PATH) as conn:
             cur = conn.execute(
-                "UPDATE characters SET name = ?, data = ?, updated_at = ? WHERE id = ?",
-                (name, data_json, ts, char_id),
+                "UPDATE characters SET name = ?, data = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+                (name, data_json, ts, char_id, user_id),
             )
             conn.commit()
             if cur.rowcount == 0:
@@ -265,9 +471,9 @@ class Handler(BaseHTTPRequestHandler):
             "updated_at": ts,
         })
 
-    def _api_delete(self, char_id):
+    def _api_delete(self, char_id, user_id):
         with sqlite3.connect(DB_PATH) as conn:
-            cur = conn.execute("DELETE FROM characters WHERE id = ?", (char_id,))
+            cur = conn.execute("DELETE FROM characters WHERE id = ? AND user_id = ?", (char_id, user_id))
             conn.commit()
             if cur.rowcount == 0:
                 send_text(self, 404, "Character not found")

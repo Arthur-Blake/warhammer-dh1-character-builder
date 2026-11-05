@@ -3,6 +3,7 @@
   --gold:#c9a227; --dim:#3a3229; --accent:#7f1d1d; --ok:#5c8a54;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{
   margin:0; background:var(--bg); color:var(--ink);
   font:15px/1.45 Georgia,"Times New Roman",serif;
@@ -117,6 +118,24 @@ td.del button{padding:1px 8px}
 .bio-mark{margin-right:6px; filter:grayscale(0.2)}
 tr[data-src="bio"], tr.data-bio{background:rgba(127,29,29,0.12)}
 footer{padding:16px; text-align:center}
+.auth-card{
+  width:min(100% - 32px, 400px); margin:10vh auto 0; padding:24px;
+  background:var(--card); border:1px solid var(--dim); border-radius:8px;
+  box-shadow:0 2px 18px #0008;
+}
+.auth-card h1{margin:0 0 10px; text-align:center}
+.auth-card>p{text-align:center; margin:0 0 18px}
+.auth-tabs{display:flex; gap:8px; margin-bottom:14px}
+.auth-tabs button{flex:1}
+.auth-form{display:grid; gap:12px}
+.auth-form label{display:grid; gap:4px; color:var(--muted); font-size:13px}
+.auth-form input{
+  width:100%; padding:8px 10px; border:1px solid var(--dim); border-radius:4px;
+  background:#141110; color:var(--ink); font:inherit;
+}
+.auth-form button{padding:8px}
+.auth-message{min-height:1.5em; margin-top:10px; color:#e6a4a4; font-size:13px}
+#signed-in-user{padding:0 4px}
 
 /* мобильная версия */
 @media (max-width:760px){

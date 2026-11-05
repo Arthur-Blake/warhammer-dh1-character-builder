@@ -15,6 +15,9 @@ let careerKitExpanded = true;   // состояние свёрнутости б�
 const API_PREFIX = "/api";
 const LS_ID_KEY = "dh1e-current-id-v1";     // id текущего персонажа
 const LS_SHEET_KEY = "dh1e-sheet-v1";       // старое локальное сохранение (миграция)
+const LS_MIGRATED_KEY = "dh1e-sheet-migrated-v1";
+let authUser = null;
+const activeCharStorageKey = () => `${LS_ID_KEY}:${authUser.id}`;
 let currentCharId = null;                   // id персонажа в SQLite
 let isApplying = false;                     // guard: не сохранять во время apply()
 let sheetDirty = false;                     // пользователь менял лист
@@ -584,7 +587,7 @@ async function loadCharacter(id) {
     apply(rec.data);
     isApplying = false;
     currentCharId = String(rec.id);
-    try { localStorage.setItem(LS_ID_KEY, currentCharId); } catch (e) {}
+    try { localStorage.setItem(activeCharStorageKey(), currentCharId); } catch (e) {}
     $("#char-list").value = currentCharId;
     sheetDirty = false;
     syncDeleteButton();
@@ -638,7 +641,7 @@ async function saveToServer(force = false) {
         const staleOption = $("#char-list").querySelector(`option[value="${CSS.escape(previousId)}"]`);
         if (staleOption) staleOption.remove();
       }
-      try { localStorage.setItem(LS_ID_KEY, currentCharId); } catch (e) {}
+      try { localStorage.setItem(activeCharStorageKey(), currentCharId); } catch (e) {}
       sheetDirty = false;
       updateCharListOption(currentCharId, data.name || "Безымянный");
       syncDeleteButton();
@@ -701,8 +704,7 @@ async function deleteCharacter(id) {
       currentCharId = null;
       sheetDirty = false;
       try {
-        localStorage.removeItem(LS_ID_KEY);
-        localStorage.removeItem(LS_SHEET_KEY);
+        localStorage.removeItem(activeCharStorageKey());
       } catch (e) { /* хранилище недоступно */ }
       apply(emptySheetData());
     }
@@ -736,8 +738,7 @@ async function resetSheet() {
     return;
   }
   try {
-    localStorage.removeItem(LS_ID_KEY);
-    localStorage.removeItem(LS_SHEET_KEY);
+    localStorage.removeItem(activeCharStorageKey());
   } catch (e) { /* хранилище недоступно */ }
   location.reload();
 }
@@ -1072,7 +1073,7 @@ async function init() {
       if (!r.ok) throw new Error(r.status);
       const rec = await r.json();
       currentCharId = String(rec.id);
-      try { localStorage.setItem(LS_ID_KEY, currentCharId); } catch (e) {}
+      try { localStorage.setItem(activeCharStorageKey(), currentCharId); } catch (e) {}
       sheetDirty = false;
       apply(data);
       await loadCharList();
@@ -1091,14 +1092,24 @@ async function init() {
   let restored = false;
 
   // 1) Если в localStorage есть id и запись существует — загружаем её
-  const savedId = localStorage.getItem(LS_ID_KEY);
+  let savedId = localStorage.getItem(activeCharStorageKey());
+  if (!savedId && !localStorage.getItem(LS_MIGRATED_KEY)) {
+    const legacyId = localStorage.getItem(LS_ID_KEY);
+    if (legacyId && $(`#char-list option[value="${CSS.escape(legacyId)}"]`)) {
+      savedId = legacyId;
+      try {
+        localStorage.setItem(activeCharStorageKey(), savedId);
+        localStorage.removeItem(LS_ID_KEY);
+      } catch (e) {}
+    }
+  }
   if (savedId && $(`#char-list option[value="${CSS.escape(savedId)}"]`)) {
     await loadCharacter(savedId);
     restored = true;
   }
 
-  // 2) Миграция: база пуста, но есть старое локальное сохранение
-  if (!restored && initialChars && initialChars.length === 0) {
+  // 2) Миграция старого локального листа — только для первого аккаунта в этом браузере.
+  if (!localStorage.getItem(LS_MIGRATED_KEY) && initialChars && initialChars.length === 0) {
     try {
       const saved = localStorage.getItem(LS_SHEET_KEY);
       if (saved) {
@@ -1111,15 +1122,18 @@ async function init() {
         if (r.ok) {
           const rec = await r.json();
           currentCharId = String(rec.id);
-          try { localStorage.setItem(LS_ID_KEY, currentCharId); } catch (e) {}
+          try { localStorage.setItem(activeCharStorageKey(), currentCharId); } catch (e) {}
           apply(data);
           await loadCharList();
           $("#char-list").value = currentCharId;
           restored = true;
+          localStorage.setItem(LS_MIGRATED_KEY, "1");
           flash("миграция из локального хранилища");
         }
-      }
+      } else localStorage.setItem(LS_MIGRATED_KEY, "1");
     } catch (e) { /* миграция не удалась — оставляем пустой лист */ }
+  } else if (initialChars && initialChars.length > 0) {
+    try { localStorage.setItem(LS_MIGRATED_KEY, "1"); } catch (e) {}
   }
 
   if (!restored) {
@@ -1138,4 +1152,83 @@ async function init() {
   updateBioStatus();
   recalc();
 }
-document.addEventListener("DOMContentLoaded", init);
+function setAuthMode(mode) {
+  const registering = mode === "register";
+  $("#login-form").hidden = registering;
+  $("#register-form").hidden = !registering;
+  $("#show-login").classList.toggle("accent", !registering);
+  $("#show-register").classList.toggle("accent", registering);
+  $("#show-login").setAttribute("aria-selected", String(!registering));
+  $("#show-register").setAttribute("aria-selected", String(registering));
+  $("#auth-message").textContent = "";
+}
+
+async function openApplication(user) {
+  authUser = user;
+  $("#signed-in-user").textContent = `Вошёл: ${user.username}`;
+  $("#auth-screen").hidden = true;
+  $("#app-shell").hidden = false;
+  await init();
+}
+
+async function submitAuth(form, endpoint) {
+  const button = form.querySelector('button[type="submit"]');
+  const message = $("#auth-message");
+  button.disabled = true;
+  message.textContent = "Проверка данных…";
+  try {
+    const fields = Object.fromEntries(new FormData(form));
+    const response = await fetch(`${API_PREFIX}/auth/${endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Не удалось выполнить вход");
+    form.reset();
+    message.textContent = "";
+    await openApplication(result.user);
+  } catch (error) {
+    message.textContent = error.message === "Failed to fetch"
+      ? "Нет соединения с сервером. Запусти приложение через python server.py."
+      : error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function startApplication() {
+  $("#show-login").addEventListener("click", () => setAuthMode("login"));
+  $("#show-register").addEventListener("click", () => setAuthMode("register"));
+  $("#login-form").addEventListener("submit", event => {
+    event.preventDefault();
+    submitAuth(event.currentTarget, "login");
+  });
+  $("#register-form").addEventListener("submit", event => {
+    event.preventDefault();
+    submitAuth(event.currentTarget, "register");
+  });
+  $("#btn-logout").addEventListener("click", async () => {
+    clearTimeout(saveTimer);
+    if (sheetDirty && !await saveToServer()) {
+      flash("не удалось сохранить изменения; выход отменён");
+      return;
+    }
+    await fetch(`${API_PREFIX}/auth/logout`, { method: "POST" });
+    location.reload();
+  });
+
+  try {
+    const response = await fetch(`${API_PREFIX}/auth/session`);
+    if (response.ok) {
+      const result = await response.json();
+      await openApplication(result.user);
+      return;
+    }
+  } catch (error) {
+    $("#auth-message").textContent = "Нет соединения с сервером. Запусти приложение через python server.py.";
+  }
+  $("#auth-screen").hidden = false;
+}
+
+document.addEventListener("DOMContentLoaded", startApplication);
