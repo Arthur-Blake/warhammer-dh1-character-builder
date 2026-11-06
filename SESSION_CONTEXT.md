@@ -1,148 +1,118 @@
-# SESSION_CONTEXT — внедрение SQLite-базы персонажей
+# SESSION_CONTEXT — переход листа на макет «Досье Инквизиции»
 
-_Сессия: 2026-11-05. Фаза: build (переход из plan). Статус: код написан, проверки НЕ завершены._
+_Сессия: 2026-11-06. Фаза: build (из plan). Статус: план согласован, КОД ЕЩЁ НЕ МЕНЯЛСЯ._
 
 ## Цель задачи
 
-Добавить SQLite-БД в лист персонажа Dark Heresy: хранение персонажей и их характеристик,
-добавление новых персонажей и загрузка существующих из БД. Выбранный режим: **локальный
-сервер** (Python stdlib), т.к. лист — статическая страница без сборки/зависимостей.
+Заменить UI экрана листа персонажа на новый макет `design-preview.html` («Концепт —
+Досье Инквизиции», коммит 6d475f5, в корне проекта). Внешний вид листа должен
+полностью совпадать с макетом; элементов, которых в макете нет, быть не должно.
+Экран входа/регистраци `#auth-screen` и серверную часть (`server.py`, SQLite,
+`/api/auth/*`, CRUD `/api/characters`) оставить как есть. `data.js` не менять.
 
-## Архитектура решения (согласована)
+## Решения пользователя (обязательны)
 
-- Приложение запускается через `python3 server.py` (порт 8000 по умолчанию, `--port`/`PORT`).
-- БД: `characters.sqlite3` рядом с server.py, таблица
-  `characters(id INTEGER PK AUTOINCREMENT, name TEXT NOT NULL, data TEXT NOT NULL, created_at TEXT, updated_at TEXT)`.
-  `data` — полный JSON-снимок `collect()` (все поля `[data-key]` + `__skills`/`__talents`/`__weapons`/`bioId`).
-- API `/api/characters`, `/api/characters/<id>`: GET список, POST, GET, PUT, DELETE.
-- UI: в тулбаре `#char-list` (select персонажей) + кнопка «＋ Новый персонаж» (`#btn-new-character`).
-- app.js: `collect()`/`apply()` остаются едиными шлюза сериализации (используются и для
-  localStorage, и для XML, и теперь для БД). Автосохранение → PUT (или POST, если записи
-  ещё нет); guard `isApplying` блокирует сохранение во время `apply()`;
-  флаг `sheetDirty` (грязный лист) управляет автопостингом.
-- Сброс (`#btn-reset`) НЕ удаляет запись в БД, только чистит localStorage-ключи и делает reload.
-- Миграция: при первом старте, если БД пуста, а в localStorage есть `dh1e-sheet-v1` — POST-перенос.
-- Старые ключи localStorage: `dh1e-sheet-v1` (снимок), `dh1e-current-id-v1` (текущий id).
+1. **Авторизация**: экран входа/регистрации оставить; всё, чего нет в макете
+   (XML-экспорт/импорт, сброс, тулбар и т.п.), убрать с экрана листа вместе с UI.
+   Эти функции можно доделать позже (JS-код export/import можно оставить неиспользуемым,
+   но обработчики на удалённые элементы снять).
+2. **Листы**: переключение/создание/удаление привязать к существующему серверному CRUD
+   и автосохранению (flashSave/saveToServer), демо-данные макета не использовать.
+3. **Новые блоки**:
+   - таланты — редактируемые на базе существующего `addTalentRow`, вид как `.talent-row` макета;
+   - экипировка — урезанный вид текущих брони/оружия/имущества (#equipment: #gear-overview/
+     #gear-management, setGearMode/renderGear, #gear-add-form), ПОЛНАЯ модель сохраняется в JSON
+     даже без UI;
+   - состояние (раны/судьба/усталость/безумие/порча/опыт) — существующие формулы источником;
+   - пси-силы, мутации, заметки («Личное дело»/«Журнал заслуг») — СТАТИКА без
+     добавления/сохранения (кнопки редактирования скрыть или disabled);
+   - неизвестные мелочи — редактируемыми по образцу макета.
+4. **Правила и данные текущего приложения — источник истины**: не переносить демо-массивы
+   макета (skillCatalog/demoSkills/demoGear/demoPsyPowers/демо-листы) и захардкоженный
+   2d10+20; селекты #creation наполнять из data.js (WORLDS/CAREERS/BIOGRAPHIES) и вешать
+   существующие onCareerChange/onBioChange.
 
-## Факты о проекте (проверены ходоками-агентами)
+## Критичные технические ловушки
 
-- Статика: `index.html` + `app.js` (~1003 строки) + `data.js` + `style.css`. Node v18, Python 3.
-- Точка входа: `index.html:167-168` (script-теги), `init()` — конец app.js.
-- Модели персонажа нет — состояние в DOM (`data-key`), сериализация `collect()`/`apply()`.
-- Характеристики: `data.js:91 CHARS`, рендер `buildChars()` (app.js ~47-73), `getVal()`, `recalc()` (~83-141).
-- Тест `bio_check.py`: Selenium + headless Chrome, чистит localStorage, открывает
-  `file:///home/grigoriev-m/Documents/DarkHeresyCharacterSheet/index.html`. Теперь лист
-  предназначен для запуска через `http://127.0.0.1:8000/` — под `file://` API недоступен.
-- В print-медиазапросе тулбар скрывается (`header .toolbar, button{display:none}`).
+- **Потеря данных при удалении полей**: `collect()` (app.js:445) читает только DOM
+  `[data-key]`. Поля, убранные со страницы (player/sex/quirks, arm-h..arm-rl, arm-ag,
+  history/contacts/notes и пр.), должны либо остаться в скрытом контейнере, либо
+  collect() должен мерджить их с последним загруженным снапшотом. То же для
+  `emptySheetData()` (app.js:670) — новые ключи не терять.
+- collect()/apply() — единый шлюз сериализации (localStorage `dh1e-current-id-v1`,
+  `dh1e-sheet-v1`, миграция; серверные PUT/POST при 404). Не ломать контракт:
+  `__skills`/`__talents`/`__weapons`/`bioId` + `[data-key]` поля.
+- `apply()` вызывает `showCareerKit(false)` (app.js:518) — блок #career-kit уйдёт из
+  разметки; ради перезаписи ранга оставить суть, но без панели.
+- Таблицы #skills-tbody/#talents-tbody/#weapons-tbody используются collect()/apply()/
+  buildHint/bioRows — структура строк документа выше (children[n]) должна сохраниться
+  или аккуратно перебиндить индексы.
+- `renderCharList`/`loadCharList`, `#char-list` → заменяется `#sheet-switcher`
+  (change: saveToServer → loadCharacter, откат выбора при неудаче — app.js:1049-1062).
+- `renderSheetBrief()` (макет) читает `.hero .meta`, `.badge`, стат-плитки, демо-массивы —
+  перебиндить на реальные данные листа.
 
-## Выполнено
+## Карта блоков макета (что рендерить чем)
 
-- `server.py` создан (статика + CRUD API + создание БД + stderr-логирование).
-- `index.html`: добавлен `#char-select` (id `char-list`) и `#btn-new-character`.
-- `style.css`: стили `#char-list`, скрытие при печати.
-- `app.js`: переменные `currentCharId` (line ~18), `isApplying` (~19), `sheetDirty` (~20);
-  `loadCharList`, `loadCharacter`, `saveToServer(force)`, `renderCharList`,
-  `updateCharListOption`; flashSave → saveToServer c debounce 300 мс; обработчики
-  `#char-list` change (~919), `#btn-new-character` (~926), init: список + миграция;
-  reset чистит LS_ID_KEY + LS_SHEET_KEY; `#save-status` статусы.
-- Мои правки поверх (все применены):
-  - `recalc()` (~140): `flashSave()` → `if (sheetDirty) flashSave();` — юзаюзёр loaded
-    лист не шлёт PUT.
-  - `sheetDirty = true` добавлен во все user-инициированные селект/инпут-изменения строк:
-    умения (~194-195), таланты + заметки (~284-285), ввод в строке оружия (~313).
+- header `.top`: `.saved` (= #save-status), `#sheet-switcher`, печать (⎙ window.print),
+  `addSheet()` (= POST emptySheetData), `deleteSheet()` (= deleteCharacter, confirm).
+- `.layout > aside.side`: якоря #overview/#stats/#skills/#equipment/#notes + цитата.
+- hero `#overview`: `#char-name`, `.meta` (badge «Аколит» + профессия · мир),
+  `#char-rank`, возраст, `#char-status`, редактор `#profile-editor`
+  (openProfileEdit/saveProfile — name/rank/age/status ← существующие data-keys name/rank/age).
+- `#creation` (details.setup): 3 селекта мир/профессия/биография из data.js.
+- `#stats`: 9 стат-плиток (значение+`small`: мир-модификатор), `rollAllCharacteristics()`
+  → rollAllChars (2d10+мод. мира из WORLDS).
+- `#skills`: обзор (skill-preview-basic/trained, `#skill-count`) / управление
+  (`#skill-rows`, #skill-add-form c `#skill-add-name`/`#skill-add-level`/`#skill-message`)
+  поверх существующих addSkillRow/calcSkillRow; уровни: basic/untrained/trained/mastery.
+- `#talents`: `.talent-row` (имя + примечание).
+- `#equipment`: грид-карточки `#gear-preview-list`, `#gear-count`, popover богатства
+  (#wealth-value/#wealth-input/saveWealth → поле wealth; rollWealth сохранить),
+  управление `#gear-rows` (name/type/stats), #gear-add-form.
+- `#state-row`: степперы adjustState(wounds/fate/fatigue), метры #wounds-meter/#fate-meter,
+  `#insanity-value`, `#corruption-value`, `#fatigue-value`, `#xp-available` + popover;
+  панель `#state-editor` (saveState/rollMaxState → rollWounds/rollFate формулы мира).
+- `#notes`/`#personal-note` и `#psy-card` (togglePsyForm/#psy-add-form), «Полевые заметки»,
+  мутации — статика.
+- `#generated-hint`: кнопка «↻ Обновить» → существующий buildHint → вывод в стиле
+  #dossier-summary (5 секций: идентификация/характеристики/умения/таланты/арсенал).
+- print-стили уже есть в макете (@media print, блок 139 mock.css) — взять его.
 
-## НЕ завершено (продолжить отсюда)
+## Убрать со страницы листа (нет в макете)
 
-1. Пометить `sheetDirty = true` в програмных изменениях листа:
-   - `rollFate` ~line 387 (`flashSave()` после установки fateLeft/fateTotal);
-   - `rollWealth` ~399 и ~405 (обе ветки внутри bio.wealthMul и обычная);
-   - `rollSanction` (~после добавления строки в notes — ищи flashSave рядом);
-   - `onBioChange` ~834 и ~857 (покупка/снятие биографии).
-2. Прогнать проверки:
-   ```
-   node --check app.js && node --check data.js && python3 -m py_compile server.py
-   python3 server.py --port 8123 &
-   curl http://127.0.0.1:8123/api/characters
-   curl -X POST http://127.0.0.1:8123/api/characters -H 'Content-Type: application/json' \
-        -d '{"name":"Тест","ws":"30"}'
-   curl http://127.0.0.1:8123/                 # должен отдать index.html
-   ls characters.sqlite3                     # файл БД
-   kill %1
-   ```
-   (sqlite3 CLI может отсутствовать — проверять через `python3 -c "import sqlite3; ..."`)
-3. Ручная UI-проверка в браузере: создание, редактирование имени, переключение,
-   новый персонаж, рестарт сервера (id восстанавливается, updated_at не прыгает на закрытом листе).
-4. `bio_check.py` — прогнать под сервером при установленном Selenium; тест писался под
-   localStorage-эпоху, может потребовать актуализации (не менять без необходимости).
-5. Финальный `@reviewer` (макс. 2 круга) — только по итогу завершённых изменений.
+Тулбар (export/import/reset/print-кнопка старая), #career-kit, поля player/sex/quirks,
+#movement/#carry/#psy (derived-боксы), #btn-sanction, старые таблицы брони/оружия 9 колонок,
+textarea history/contacts/notes (старый вид), #btn-hint — всё заменить разметкой макета,
+данные сохранить (см. ловушки). Обработчики init() (app.js:998-1154) на removed ID снять.
 
-## Риски / решения
+## Стили
 
-- Решение: условие автосохранения \(не\) заменено на `if (!sheetDirty && !force) return;`
-  — ПОЛНАЯ замена ломает сохранение после роллов/покупки биографии (они звали flashSave
-  без dirty). Это применение выше через пункт 1 (пометить dirty в этих функциях).
-- Лог выбора персонажа: `saveToServer()` перед `loadCharacter(id)` (app.js ~922).
-- 404 при PUT → fallback на POST-создание (запись удалена снаружи).
-- Статусные сообщения: «сохранение…», «сохранено …», «Не сохранено (offline?)».
-- `__pycache__` появился от py_compile — можно удалить/занести в .gitignore (его нет).
+- Новый style.css = инлайн-CSS макета (26 блоков, 44.7KB — не редактировать вручную
+  целиком, копи-паст из файла) + старые правила для `.auth-card`/auth-form (style.css:121-138)
+  + `#save-status`-стиль под `.saved` + @page/print-адаптация (макетный @media print уже есть).
+- Старые классы (toolbar/grid-4/tbl-chars/kit/hcards...) не нужны на листе, но auth
+  экран их использует (btn/accent/muted) — базовые button/muted оставить.
 
----
+## Порядок реализации
 
-# ПЛАН сессии 2026-11-05 (вторая задача) — UX листа: печать, персонажи, сброс
+1. index.html: разметка = auth-screen (как есть) + скелет макета (body design-preview,
+   без onclick-инлайнов — обработчики через app.js; dynamic контейнеры пустые).
+2. style.css: CSS макета + auth + save-status + print правки.
+3. app.js: перебиндить (см. карту); добавить glue: openProfileEdit/saveProfile,
+   setSkillMode/renderSkills (2 режима), setGearMode/renderGear (name/type/stats ↔ модель),
+   adjustState/метры/saveState/rollMaxState, popovers (wealth/xp), renderSheetSwitcher?,
+   updateStatusMeters, брифер вместо buildHint-вывода (evaluate — можно оставить
+   hcards-логику, вывод в brief-секции).
+4. Проверки: node --check app.js && node --check data.js; py_compile server.py;
+   python3 server.py --port 8123 → GET / (200, новая index) + CRUD curl; grep на
+   удалённые ID; ручная проверка: вход, CRUD, автосохранение, migrate, биография-строки,
+   печать, сверка с макетом таблица/боксы (через bio_check.py Selenium — устарел, аккуратно).
 
-_Фаза: build. Статус: план согласован, реализация в этой же сессии._
+## Статус (что сделано в сессии)
 
-## Постановка (запрос пользователя)
-
-1. При печати характеристик «уезжает» шапка страницы — исправить печатную раскладку.
-2. «Новый персонаж» должен создавать новый ПУСТОЙ лист (сейчас копируется текущий лист
-   без имени — `app.js:932-954`).
-3. Нужна кнопка удаления персонажа из БД (клиентского DELETE нет; серверный эндпоинт
-   `DELETE /api/characters/{id}` готов — `server.py:164-174, 268-275`).
-4. Пункт «— выбрать персонажа —» в селекте должен пропадать, когда персонажей > 0
-   (допущение: скрывается placeholder-опция `<option value="">`, сам селект остаётся).
-5. «Сброс» должен удалять ВСЕ данные персонажа, включая запись в БД (сейчас он не трогает
-   БД — `app.js:908-915`, текст confirm это фиксирует).
-
-## Установленные факты (ходоками-агентами)
-
-- Шапка: `index.html:10-22` (`header` + `.toolbar`); print-стили только
-  `style.css:129-140` — тулбар и все кнопки скрываются (`:132`), остальных
-  позиционирований/разрывов страниц нет; лист наследует экранную раскладку.
-- Кнопки тулбара: `#btn-export/#btn-import/#btn-print/#btn-reset/#btn-new-character`,
-  селект `#char-list` (`index.html:13-20`), статус `#save-status`.
-- Персонажи: `renderCharList()` app.js:519-529 (первая опция всегда placeholder),
-  `updateCharListOption` (:531-540), `loadCharList` (:542-550), `loadCharacter` (:552-568),
-  `saveToServer` (:570-608; PUT → при 404 POST), `flashSave` debounce 300мс (:610-614).
-- Новый персонаж (:932-954): saveToServer → `collect()`, `data.name=""` → POST → id в
-  `localStorage[LS_ID_KEY]` → `apply(data)` → loadCharList.
-- Сброс (:908-915): confirm → удалить LS_ID_KEY + LS_SHEET_KEY → reload; БД не трогается.
-- БД: `characters.sqlite3`, таблица `characters(id, name, data, created_at, updated_at)`.
-- collect/apply — единые шлюзы сериализации (app.js:437-460 / 462-513).
-- Чистый лист при первом старте: `addSkillRow(); addTalentRow(); addWeaponRow();`
-  (app.js:993-997), xpTotal=400 (app.js:1000, index.html:88).
-
-## Изменения (план)
-
-- `app.js`:
-  - новая функция пустого листа `emptySheetData()` — начальное состояние
-    (xpTotal=400 + дефолт-строки умений/талантов/оружия), используется и «Новый персонаж»,
-    и «Сброс», и init без сохранённого id;
-  - «Новый персонаж» → POST с `emptySheetData()`, а не копией текущего;
-  - `deleteCharacter(id)` → `fetch DELETE /api/characters/{id}`; кнопка «✖ Удалить»
-    в тулбаре рядом с селектом; после удаления активного — чистый лист без сохранения;
-  - «Сброс» → при наличии currentCharId DELETE записи + очистка LS_ID_KEY/LS_SHEET_KEY +
-    reload; confirm-текст обновить;
-  - `renderCharList()`: placeholder-опция добавляется только если персонажей 0.
-- `index.html`: кнопка `#btn-delete-character`.
-- `style.css`: печатные правила для шапки (без flex-сжатия/переноса, стабильные отступы),
-  при необходимости page-break перед секциями; стиль кнопки удаления.
-- server.py не меняется (DELETE уже готов).
-
-## Проверки
-
-- `node --check app.js && node --check data.js`
-- curl-сценарий CRUD на порту 8123 (см. блок проверок выше), включая DELETE.
-- Ручная: печать (шапка на месте), новый пустой лист, скрытие placeholder, удаление
-  активного/неактивного, полный сброс (записи нет в БД).
-- Финальный `@reviewer` (макс. 2 круга).
+- Изучены design-preview.html (тело/JS/CSS, извлечения в /tmp/opencode/mock_*),
+  index.html, app.js (полностью), style.css (полностью), AGENTS.md.
+- @coder-агент не смог запуститься (upstream отказ, пустые assistant-сообщения) —
+  реализацию продолжает основной агент руками.
+- Код проекта НЕ изменён. Git чист (последний коммит 6d475f5).
