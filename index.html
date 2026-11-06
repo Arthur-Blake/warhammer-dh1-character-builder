@@ -3,196 +3,72 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Лист персонажа — Dark Heresy (1 изд.)</title>
+<title>Досье персонажа — Dark Heresy (1 изд.)</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <section id="auth-screen" class="auth-card" aria-labelledby="auth-title">
   <h1 id="auth-title">◈ Dark Heresy ◈</h1>
-  <p class="muted">Войди в аккаунт или создай новый, чтобы открыть листы персонажей.</p>
+  <p>Войди в аккаунт или создай новый, чтобы открыть листы персонажей.</p>
   <div class="auth-tabs" role="tablist" aria-label="Авторизация">
-    <button id="show-login" type="button" class="accent" role="tab" aria-selected="true">Вход</button>
-    <button id="show-register" type="button" role="tab" aria-selected="false">Регистрация</button>
+    <button id="show-login" type="button" class="btn primary" role="tab" aria-selected="true">Вход</button>
+    <button id="show-register" type="button" class="btn" role="tab" aria-selected="false">Регистрация</button>
   </div>
   <form id="login-form" class="auth-form">
     <label>Логин<input name="username" type="text" minlength="3" maxlength="32" autocomplete="username" required></label>
     <label>Пароль<input name="password" type="password" minlength="4" maxlength="20" autocomplete="current-password" required></label>
-    <button type="submit" class="accent">Войти</button>
+    <button type="submit" class="btn primary">Войти</button>
   </form>
   <form id="register-form" class="auth-form" hidden>
-    <label>Логин<input name="username" type="text" minlength="3" maxlength="32" pattern="[A-Za-z0-9_]{3,32}" autocomplete="username" required>
-      <span class="muted">3–32 латинских буквы, цифры или _</span></label>
-    <label>Пароль<input name="password" type="password" minlength="4" maxlength="20" autocomplete="new-password" required>
-      <span class="muted">От 4 до 20 символов</span></label>
-    <button type="submit" class="accent">Создать аккаунт</button>
+    <label>Логин<input name="username" type="text" minlength="3" maxlength="32" pattern="[A-Za-z0-9_]{3,32}" autocomplete="username" required><small>3–32 латинских буквы, цифры или _</small></label>
+    <label>Пароль<input name="password" type="password" minlength="4" maxlength="20" autocomplete="new-password" required><small>От 4 до 20 символов</small></label>
+    <button type="submit" class="btn primary">Создать аккаунт</button>
   </form>
   <div id="auth-message" class="auth-message" role="status" aria-live="polite"></div>
 </section>
 
 <div id="app-shell" hidden>
-<header>
-  <h1>◈ Лист персонажа — Dark Heresy ◈</h1>
-  <div class="toolbar">
-    <button id="btn-export" title="Экспорт XML">⬇ XML</button>
-    <button id="btn-import" title="Импорт XML">⬆ XML</button>
-    <input type="file" id="file-import" accept=".xml" hidden>
-    <button id="btn-print">🖨 Печать</button>
-    <button id="btn-reset" title="Очистить лист">🗑 Сброс</button>
-    <select id="char-list" title="Выбрать персонажа"><option value="">— выбрать персонажа —</option></select>
-    <button id="btn-new-character" title="Создать нового персонажа">＋ Новый персонаж</button>
-    <button id="btn-delete-character" class="accent" title="Удалить выбранного персонажа" disabled>✖ Удалить</button>
-    <span id="save-status" class="muted">автосохранение…</span>
-    <span id="signed-in-user" class="muted"></span>
-    <button id="btn-logout" type="button" title="Выйти из аккаунта">Выйти</button>
-  </div>
+<header class="top">
+  <div class="brand"><div class="seal" aria-hidden="true"><b>✦</b></div><div><div class="brand-name">Досье Инквизиции</div><div class="brand-sub">Ордо Херетикус · Сегментум Солар</div></div></div>
+  <nav class="toplinks" aria-label="Разделы"><a href="#creation">Происхождение</a><a href="#stats">Характеристики</a><a href="#skills">Навыки</a><a href="#equipment">Снаряжение</a><a href="#notes">Досье</a></nav>
+  <div class="actions"><span id="save-status" class="saved" role="status">Сохранено</span><select id="sheet-switcher" aria-label="Выбрать лист персонажа"></select><button id="btn-print" class="btn print-btn" type="button" title="Печать листа" aria-label="Печать листа">⎙</button><button id="btn-new-character" class="btn primary sheet-action" type="button">＋ Новый лист</button><button id="btn-delete-character" class="btn danger sheet-action" type="button" disabled>✖ Устранить</button></div>
 </header>
-
-<main>
-<!-- АНКЕТА -->
-<section class="card" id="sec-info">
-  <h2>Аколит</h2>
-  <div class="grid-4">
-    <label>Имя<input data-key="name" type="text"></label>
-    <label>Игрок<input data-key="player" type="text"></label>
-    <label>Родной мир
-      <select data-key="world" id="sel-world"><option value="">— выбери —</option></select>
-    </label>
-    <label>Профессия
-      <select data-key="career" id="sel-career"><option value="">— выбери —</option></select>
-    </label>
-    <label>Ранг<input data-key="rank" type="text"></label>
-    <label>Пол<select data-key="sex" id="sel-sex">
-      <option value=""></option><option>М</option><option>Ж</option></select>
-    </label>
-    <label>Возраст<input data-key="age" type="number" min="16" max="400"></label>
-    <label>Приметы<div><input data-key="quirks" type="text" placeholder="шрамы, татуировки…"></div></label>
-  </div>
-  <div id="career-kit" class="kit muted" hidden></div>
-</section>
-
-<!-- ХАРАКТЕРИСТИКИ -->
-<section class="card" id="sec-chars">
-  <h2>Характеристики
-    <button id="btn-roll-chars" class="accent">🎲 Напылить всё (2d10)</button>
-  </h2>
-  <table class="tbl-chars">
-    <thead><tr><th>Характеристика</th><th>Значение</th><th>Улучшения</th><th>Итог</th><th>Бонус</th></tr></thead>
-    <tbody id="chars-tbody"></tbody>
-  </table>
-</section>
-
-<!-- ПРОИЗВОДНЫЕ -->
-<section class="card" id="sec-derived">
-  <h2>Производные параметры</h2>
-  <div class="grid-4">
-    <label>Раны (d5+mod.)
-      <div class="inline"><button class="roll" id="btn-wounds">🎲</button>
-        <input data-key="wounds" type="number" id="wounds" min="1"></div>
-    </label>
-    <label>Очки Судьбы (всего)
-      <div class="inline"><button class="roll" id="btn-fate">🎲 d10</button>
-        <input data-key="fateTotal" type="number" id="fateTotal" min="0"></div>
-    </label>
-    <label>Судьба (осталось)<input data-key="fateLeft" type="number" id="fateLeft" min="0"></label>
-    <label>Передвижение
-      <div id="movement" class="derived-box">—</div>
-    </label>
-    <label>Усталость (макс.)
-      <div id="fatigue" class="derived-box">—</div>
-    </label>
-    <label>Нагрузка (Сил+Вын)
-      <div id="carry" class="derived-box">—</div>
-    </label>
-    <label>Психосилы (Малые)
-      <div id="psy" class="derived-box">—</div>
-      <button class="roll hidden" id="btn-sanction" type="button">🎲 Табл. 1-5: Санкционирование</button>
-    </label>
-    <label>Богатство, Троны
-      <div class="inline"><button class="roll" id="btn-wealth">🎲</button>
-        <input data-key="wealth" type="number" id="wealth" min="0"></div>
-    </label>
-    <label>Опыт (всего)<input data-key="xpTotal" type="number" value="400"></label>
-    <label>Потрачено<input data-key="xpSpent" type="number"></label>
-    <label>Доступно<div id="xpFree" class="derived-box">—</div></label>
-    <div class="bio-card">
-      <label for="sel-bio">Биография</label>
-      <select id="sel-bio"><option value="">— биография не куплена —</option></select>
-      <div id="bio-status" class="muted">выбери профессию</div>
-    </div>
-    <label>Безумие<input data-key="insanity" type="number"></label>
-    <label>Порча<input data-key="corruption" type="number"></label>
-  </div>
-</section>
-
-<!-- УМЕНИЯ -->
-<section class="card" id="sec-skills">
-  <h2>Умения
-    <button id="btn-add-skill" class="accent">+ добавить</button>
-    <span class="hint">Базовое = половина характеристики (вниз); без обучения = характеристика (0); обучено +10; владение +20</span>
-  </h2>
-  <table class="tbl-rows" id="skills-table">
-    <thead><tr><th>Умение</th><th>Хар-ка</th><th>Уровень</th><th>Цель Теста</th><th></th></tr></thead>
-    <tbody id="skills-tbody"></tbody>
-  </table>
-</section>
-
-<!-- ТАЛАНТЫ -->
-<section class="card" id="sec-talents">
-  <h2>Таланты и способности
-    <button id="btn-add-talent" class="accent">+ добавить</button>
-  </h2>
-  <table class="tbl-rows" id="talents-table">
-    <thead><tr><th style="width:55%">Талант</th><th>Примечание</th><th></th></tr></thead>
-    <tbody id="talents-tbody"></tbody>
-  </table>
-</section>
-
-<!-- ЭКИПИРОВКА -->
-<section class="card" id="sec-gear">
-  <h2>Броня, оружие и имущество</h2>
-  <div class="grid-4 armour">
-    <label>Голова<input data-key="arm-h" placeholder="число"></label>
-    <label>Тело<input data-key="arm-b"></label>
-    <label>Л. рука<input data-key="arm-la"></label>
-    <label>П. рука<input data-key="arm-ra"></label>
-    <label>Л. нога<input data-key="arm-ll"></label>
-    <label>П. нога<input data-key="arm-rl"></label>
-    <label>Штраф Ловк. от брони<input data-key="arm-ag"></label>
-  </div>
-  <table class="tbl-rows weapons">
-    <thead><tr><th>Оружие</th><th>Класс</th><th>Урон</th><th>Тип</th><th>Пен</th><th>Дальн.</th><th>Обойма</th><th>Перез.</th><th>Особое</th><th></th></tr></thead>
-    <tbody id="weapons-tbody"></tbody>
-  </table>
-  <div class="wgrid">
-    <button id="btn-add-weapon" class="accent">+ оружие</button>
-    <label class="full">Имущество<textarea data-key="gear" rows="4" placeholder="стартовое имущество профессии + покупки"></textarea></label>
-  </div>
-</section>
-
-<!-- ПРОЧЕЕ -->
-<section class="card" id="sec-notes">
-  <h2>История, связи и заметки</h2>
-  <label>История<textarea data-key="history" rows="3"></textarea></label>
-  <label>Связи / враги<textarea data-key="contacts" rows="2"></textarea></label>
-  <label>Заметки<textarea data-key="notes" rows="2"></textarea></label>
-</section>
-<!-- СПРАВКА -->
-<section class="card" id="sec-hint">
-  <h2>Краткая справка по листу
-    <button id="btn-hint" class="accent">🔄 Обновить подсказку</button>
-    <span class="hint">строится только по нажатию кнопки</span>
-  </h2>
-  <div id="hint-box" class="muted">
-    Нажми «Обновить подсказку» — здесь соберутся краткие описания добавленных умений, талантов, оружия и снаряжения.
-  </div>
-</section>
-</main>
-
-<footer class="muted">
-  Dark Heresy © Fantasy Flight Games / Games Workshop. Неофициальный фанатский лист для личного пользования.
-</footer>
+<div class="layout">
+  <aside class="side" aria-label="Навигация по листу"><small>Лист персонажа</small><a class="active" href="#overview">◈ &nbsp; Обзор листа</a><a href="#stats">▦ &nbsp; Характеристики</a><a href="#skills">⌘ &nbsp; Навыки и таланты</a><a href="#equipment">⚔ &nbsp; Снаряжение</a><a href="#notes">✧ &nbsp; Досье и заметки</a><button id="btn-logout" class="side-logout" type="button" title="Выйти из аккаунта"><span aria-hidden="true">↩</span> Выйти из аккаунта</button><blockquote>«Невежество — это сила.<br>Бдительность — спасение.»</blockquote></aside>
+  <main class="main">
+    <div class="eyebrow" id="sheet-record">Запись персонажа &nbsp; / &nbsp; Dark Heresy · 1-е издание</div>
+    <section class="hero" id="overview">
+      <div class="identity"><div class="rank" aria-hidden="true">✦</div><div><h1 id="char-name">—</h1><div class="meta"><span class="badge">Аколит</span><b id="char-career">—</b><span id="char-world">—</span></div></div></div>
+      <button id="btn-profile-edit" class="profile-edit-btn" type="button" aria-label="Редактировать данные персонажа" title="Редактировать данные персонажа">✎</button>
+      <div class="details"><div class="detail">Ранг<b id="char-rank">—</b></div><div class="detail">Возраст<b id="char-age">—</b></div><div class="detail">Предыстория<b id="char-bio">—</b></div><div class="detail">Статус<b id="char-status">—</b></div></div>
+      <div class="profile-editor" id="profile-editor" hidden><div class="profile-editor-title">Редактировать данные персонажа</div><div class="profile-edit-fields"><label>Имя персонажа<input data-key="name" id="profile-name" type="text" maxlength="60"></label><label>Ранг<input data-key="rank" id="profile-rank" type="text" maxlength="40"></label><label>Возраст<input data-key="age" id="profile-age" type="number" min="16" max="400"></label><label>Статус<input data-key="status" id="profile-status" type="text" maxlength="80"></label></div><div class="profile-edit-actions"><button id="btn-profile-cancel" class="btn" type="button">Отмена</button><button id="btn-profile-save" class="btn primary" type="button">Сохранить</button></div></div>
+    </section>
+    <details class="setup" id="creation" open><summary><span><b>Происхождение и профессия</b><small id="creation-summary">Выбери мир, класс и биографию</small></span><em>Изменить <i>＋</i></em></summary><div class="setup-body"><label>Мир происхождения<select data-key="world" id="sel-world"><option value="">— выбери —</option></select><small>Модификаторы характеристик и особенности</small></label><label>Класс / профессия<select data-key="career" id="sel-career"><option value="">— выбери —</option></select><small>Определяет стартовый набор и варианты биографии</small></label><label>Предыстория · биография<select id="sel-bio"><option value="">— биография не куплена —</option></select><small id="bio-status">выбери профессию</small></label></div></details>
+    <section class="card character-core" id="character-core"><div class="core-head"><div><h2>Лист персонажа</h2><span>Характеристики · Навыки · Таланты</span></div></div><div class="dashboard-grid" id="dashboard-grid">
+      <section class="card" id="stats"><div class="card-head"><div><h2>Характеристики</h2><span class="kicker">Итог · бонус</span><small class="stat-roll-formula">2d10 + модификатор мира</small></div></div><button id="btn-roll-chars" class="stat-roll-button" type="button" aria-label="Бросить все характеристики" title="Бросить все характеристики">↻</button><div class="stats" id="chars-tbody"></div></section>
+      <div class="row" id="skill-section-row">
+        <section class="card skills-card" id="skills"><div class="skill-face" id="skill-overview"><div class="skill-card-head"><div><h2>Навыки</h2><span class="kicker"><span id="skill-count">0</span> навыков · обзор</span></div><button class="text-action" id="btn-skill-manage" type="button">Навыки →</button></div><div class="skill-subsections"><section class="skill-subsection"><h3>Базовые</h3><div class="skill-preview-list" id="skill-preview-basic"></div></section><section class="skill-subsection"><h3>Обученные</h3><div class="skill-preview-list" id="skill-preview-trained"></div></section></div></div>
+          <div class="skill-face" id="skill-management" hidden><div class="skill-card-head"><div><h2>Все навыки</h2><span class="kicker">Добавляй, меняй уровень или удаляй записи</span></div><button class="btn" id="btn-skill-overview" type="button">← Свернуть</button></div><div class="table-scroll"><table class="skill-table"><thead><tr><th>Навык</th><th>Характеристика</th><th>Уровень</th><th>Цель</th><th></th></tr></thead><tbody id="skills-tbody"></tbody></table></div><form class="skill-add-form" id="skill-add-form"><label>Новый навык<select id="skill-add-name" required><option value="">— выбери навык —</option></select></label><label>Уровень<select id="skill-add-level"><option value="basic">Базовое</option><option value="untrained">Без обучения</option><option value="trained">Обучено +10</option><option value="mastery">Владение +20</option></select></label><button class="btn primary" type="submit">＋ Добавить навык</button><div id="skill-message" role="status" aria-live="polite"></div></form></div>
+        </section>
+        <section class="card talent-card" id="talents"><div class="skill-face" id="talent-overview"><div class="skill-card-head"><div><h2>Таланты</h2><span class="kicker">Начальные и биографические</span></div><button class="text-action" id="btn-talent-manage" type="button">Таланты →</button></div><div class="talent-list" id="talent-preview-list"></div></div><div class="skill-face" id="talent-management" hidden><div class="skill-card-head"><div><h2>Все таланты</h2><span class="kicker">Добавляй, уточняй и удаляй записи</span></div><button class="btn" id="btn-talent-overview" type="button">← Свернуть</button></div><div class="table-scroll"><table class="skill-table talent-table"><thead><tr><th>Талант</th><th>Источник</th><th>Примечание</th><th></th></tr></thead><tbody id="talents-tbody"></tbody></table></div><form class="skill-add-form" id="talent-add-form"><label>Новый талант<select id="talent-add-name" required><option value="">— выбери талант —</option></select></label><label>Примечание<input id="talent-add-note" type="text" maxlength="120" placeholder="Подтип или уточнение"></label><button class="btn primary" type="submit">＋ Добавить талант</button><div id="talent-message" role="status" aria-live="polite"></div></form></div></section>
+      </div>
+    </div></section>
+    <section class="card secondary-grid field-kit-block" id="secondary-grid"><div class="field-kit-head"><h2>Полевое оснащение</h2><span>Пси · записи · арсенал</span></div><div class="field-kit-columns"><div class="secondary-left"><details class="card psy-card" id="psy-card" open><summary><span><h2>Психические силы</h2><small>Силы и связанные проявления</small></span><span class="psy-chevron">⌄</span></summary><div class="psy-content"><section class="psy-powers"><div class="psy-subhead"><h3>Силы</h3></div><div class="psy-power-list"><p class="psy-empty">Психические силы не записаны.</p></div></section><section class="psy-mutations"><h3>Мутации</h3><p>Записей нет.</p></section></div></details><section class="card field-notes-card" id="field-notes"><div class="field-notes-head"><div><h2>Полевые заметки</h2><span class="kicker">Рабочая тетрадь</span></div><div class="note-actions"><button class="note-more" type="button" data-note-more="field" hidden>Подробнее</button><button class="edit-icon" type="button" data-note-edit="field" aria-label="Редактировать полевые заметки" title="Редактировать">✎</button></div></div><span class="field-notes-mark">ORDO</span><p class="note note-clamp" id="field-text">Записей нет.</p><div class="note-editor" id="field-editor" hidden><textarea id="field-input" rows="5"></textarea><div class="note-editor-actions"><button class="btn" type="button" data-note-cancel="field">Отмена</button><button class="btn primary" type="button" data-note-save="field">Сохранить</button></div></div></section></div>
+      <section class="card gear-card" id="equipment"><div class="gear-face" id="gear-overview"><div class="skill-card-head"><div><h2>Снаряжение</h2><span class="kicker"><span id="gear-count">0</span> предметов</span></div><button class="text-action" id="btn-gear-manage" type="button">Арсенал →</button></div><div class="gear" id="gear-preview-list"></div><div class="wealth-line"><div><strong>Богатство, Троны</strong><small>Доступно</small></div><div class="wealth-edit"><strong><span id="wealth-value">0</span> <small>Тр.</small></strong><details class="xp-edit"><summary aria-label="Изменить богатство" title="Изменить богатство">✎</summary><div class="xp-popover"><label>Богатство · Троны<input data-key="wealth" id="wealth-input" type="number" min="0"></label><button id="btn-wealth-save" class="btn primary" type="button">✓ Сохранить</button><button id="btn-wealth-roll" class="text-action" type="button">🎲 Бросить</button></div></details></div></div></div>
+        <div class="gear-face" id="gear-management" hidden><div class="skill-card-head"><div><h2>Арсенал · все предметы</h2><span class="kicker">Добавляй или удаляй снаряжение</span></div><button class="btn" id="btn-gear-overview" type="button">← Свернуть</button></div><div class="table-scroll"><table class="skill-table gear-table"><thead><tr><th>Предмет</th><th>Тип / область</th><th>Характеристики</th><th></th></tr></thead><tbody id="gear-rows"></tbody></table></div><form class="skill-add-form" id="gear-add-form"><label>Название<input id="gear-new-name" type="text" maxlength="80" required></label><label>Тип / область<input id="gear-new-type" type="text" maxlength="80" placeholder="Оружие, броня, предмет" required></label><label>Характеристики<input id="gear-new-stats" type="text" maxlength="120" placeholder="Урон, защита или примечание"></label><button class="btn primary" type="submit">＋ Добавить предмет</button><div id="gear-message" role="status" aria-live="polite"></div></form></div>
+      </section></div></section>
+    <div class="state-row" id="state-row"><section class="card status-card"><div class="card-head"><div class="heading-with-edit"><h2>Состояние персонажа</h2><button id="btn-state-edit" class="edit-icon" type="button" aria-label="Редактировать состояние" title="Редактировать">✎</button></div><span class="kicker">В поле</span></div><div class="metrics">
+      <div class="metric-pair"><div class="metric"><label>Раны</label><div class="counter-meter"><div class="state-stepper"><button type="button" data-state="wounds" data-delta="1" aria-label="Увеличить раны">▲</button><button type="button" data-state="wounds" data-delta="-1" aria-label="Уменьшить раны">▼</button></div><div class="counter-value"><strong><span id="wounds-current">0</span> <small>/ <span id="wounds-total">0</span></small></strong><div class="meter"><i id="wounds-meter"></i></div></div></div></div><div class="metric"><label>Очки судьбы</label><div class="counter-meter"><div class="state-stepper"><button type="button" data-state="fate" data-delta="1" aria-label="Увеличить очки судьбы">▲</button><button type="button" data-state="fate" data-delta="-1" aria-label="Уменьшить очки судьбы">▼</button></div><div class="counter-value"><strong><span id="fate-current">0</span> <small>/ <span id="fate-total">0</span></small></strong><div class="meter fate"><i id="fate-meter"></i></div></div></div></div></div>
+      <div class="metric-pair"><div class="metric"><label>Очки безумия</label><strong><span id="insanity-value">0</span> <small>ОО</small></strong></div><div class="metric"><label>Очки порчи</label><strong><span id="corruption-value">0</span> <small>ОО</small></strong></div></div>
+      <div class="metric-pair"><div class="metric"><label>Усталость</label><div class="counter-meter"><div class="state-stepper"><button type="button" data-state="fatigue" data-delta="1" aria-label="Увеличить усталость">▲</button><button type="button" data-state="fatigue" data-delta="-1" aria-label="Уменьшить усталость">▼</button></div><strong><span id="fatigue-value">0</span> <small>уровень</small></strong></div></div><div class="metric xp-metric"><label>Свободный опыт</label><div class="xp-value"><strong><span id="xp-available">0</span> <small>ОО</small></strong><details class="xp-edit"><summary aria-label="Изменить опыт" title="Изменить">✎</summary><div class="xp-popover"><label>Всего ОО<input data-key="xpTotal" id="xp-total-input" type="number" min="0"></label><label>Потрачено ОО<input data-key="xpSpent" id="xp-spent-input" type="number" min="0"></label><button id="btn-xp-save" class="btn primary" type="button">✓ Сохранить</button></div></details></div></div></div>
+    </div><div class="state-editor" id="state-editor" hidden><div class="state-fields"><div class="state-group"><label>Максимум ран<input data-key="wounds" id="state-wounds-total" type="number" min="1"></label><label>Раны сейчас<input data-key="woundsCurrent" id="state-wounds-current" type="number" min="0"></label></div><div class="state-group"><label>Всего очков судьбы<input data-key="fateTotal" id="state-fate-total" type="number" min="0"></label><label>Очки судьбы осталось<input data-key="fateLeft" id="state-fate-current" type="number" min="0"></label></div><div class="state-group"><label>Очки безумия<input data-key="insanity" id="state-insanity" type="number" min="0"></label><label>Очки порчи<input data-key="corruption" id="state-corruption" type="number" min="0"></label></div><div class="state-group"><label>Усталость<input data-key="fatigueCurrent" id="state-fatigue" type="number" min="0"></label></div></div><div class="state-actions"><div class="roll-actions"><button id="btn-roll-state" class="btn" type="button">⚄ Бросить раны и судьбу</button></div><div class="state-actions-right"><button id="btn-state-cancel" class="btn" type="button">Отмена</button><button id="btn-state-save" class="btn primary" type="button">Сохранить</button></div></div><div class="state-roll-note" id="state-roll-note" role="status" aria-live="polite"></div></div></section></div>
+    <div class="bottom"><section class="card note-card" id="notes"><div class="note-head"><div><h2>Личное дело</h2><span class="kicker">Досье</span></div><div class="note-actions"><button class="note-more" type="button" data-note-more="dossier" hidden>Подробнее</button><button class="edit-icon" type="button" data-note-edit="dossier" aria-label="Редактировать личное дело" title="Редактировать">✎</button></div></div><p class="note note-clamp" id="dossier-text">Записей нет.</p><div class="note-editor" id="dossier-editor" hidden><textarea id="dossier-input" rows="5"></textarea><div class="note-editor-actions"><button class="btn" type="button" data-note-cancel="dossier">Отмена</button><button class="btn primary" type="button" data-note-save="dossier">Сохранить</button></div></div></section><section class="card note-card" id="personal-note"><div class="note-head"><div><h2>Журнал заслуг</h2><span class="kicker">Для себя</span></div><div class="note-actions"><button class="note-more" type="button" data-note-more="merit" hidden>Подробнее</button><button class="edit-icon" type="button" data-note-edit="merit" aria-label="Редактировать журнал заслуг" title="Редактировать">✎</button></div></div><p class="note note-clamp" id="merit-text">Записей нет.</p><div class="note-editor" id="merit-editor" hidden><textarea id="merit-input" rows="5"></textarea><div class="note-editor-actions"><button class="btn" type="button" data-note-cancel="merit">Отмена</button><button class="btn primary" type="button" data-note-save="merit">Сохранить</button></div></div></section></div>
+    <section class="card hint-card" id="generated-hint"><div class="hint-head"><div><h2>Краткая справка по листу</h2><span class="kicker">Досье персонажа · сводка для оперативного использования</span></div><button id="btn-hint" class="text-action" type="button" aria-label="Обновить справку" title="Обновить справку">↻ Обновить</button></div><div class="brief-grid" id="dossier-summary"><p class="brief-empty">Нажми «Обновить», чтобы собрать сводку по листу.</p></div></section>
+    <div class="footer">Ordo Hereticus · Запись защищена печатью допуска</div>
+  </main>
 </div>
-
+<div id="legacy-fields" hidden><select data-key="sex"><option value=""></option><option>М</option><option>Ж</option></select><input data-key="quirks"><input data-key="arm-h"><input data-key="arm-b"><input data-key="arm-la"><input data-key="arm-ra"><input data-key="arm-ll"><input data-key="arm-rl"><input data-key="arm-ag"><input data-key="dossier"><input data-key="meritNotes"><input data-key="fieldNotes"><textarea data-key="gear"></textarea><table><tbody id="weapons-tbody"></tbody></table></div>
+</div>
 <script src="data.js"></script>
 <script src="app.js"></script>
 </body>

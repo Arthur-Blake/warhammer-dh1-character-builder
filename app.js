@@ -9,7 +9,6 @@ const d5  = () => Math.ceil(d10() / 2);               // d10: 1-2→1 … 9-10�
 const num = v => parseInt(v, 10) || 0;
 
 let uidSeq = 0;
-let careerKitExpanded = true;   // состояние свёрнутости блока #career-kit
 
 /* ---------- серверное хранилище ---------- */
 const API_PREFIX = "/api";
@@ -22,6 +21,9 @@ let currentCharId = null;                   // id персонажа в SQLite
 let isApplying = false;                     // guard: не сохранять во время apply()
 let sheetDirty = false;                     // пользователь менял лист
 let suppressAutosave = false;               // переход/удаление персонажа
+let gearItems = [];
+let profileEditorSnapshot = null;
+let stateEditorSnapshot = null;
 
 /* ---------- характеристики ---------- */
 const curWorld = () => WORLDS.find(w => w.id === $("#sel-world").value);
@@ -45,45 +47,38 @@ function charFixes(key) {
   return out;
 }
 
-/* разбор источников цифры у сгенерированного значения:
-   «+20 (Мир-кузница) +3 (Годен) +5 (Биография)» — мод. напыления уже внутри base */
+/* Модификаторы, показываемые под результатом броска: мир, профессия и предыстория. */
 function fixBreakdown(key) {
   const w = curWorld();
-  if (!w) return "";
-  const parts = [];
-  if (w.mods[key]) parts.push(`${fmtMod(w.mods[key])} (${w.name})`);
-  for (const f of charFixes(key)) parts.push(`${fmtMod(f.v)} (${f.bio ? "🛠️ " : ""}${f.src})`);
-  return parts.length ? `[${parts.join(" ")}]` : "";
+  if (!w) return "мир не выбран";
+  const parts = [`мир ${fmtMod(w.mods[key] || 0)}`];
+  for (const f of charFixes(key)) {
+    const source = f.bio ? f.src.replace(/^Биография:\s*/i, "") : f.src;
+    parts.push(`${fmtMod(f.v)} ${source}`);
+  }
+  return parts.join(" · ");
 }
 
 function buildChars() {
-  const tb = $("#chars-tbody");
-  tb.innerHTML = "";
+  const root = $("#chars-tbody");
+  const legacy = $("#legacy-fields");
+  root.innerHTML = "";
   for (const c of CHARS) {
-    const tr = document.createElement("tr");
-    tr.innerHTML =
-      `<td>${c.name} <span class="muted">(${c.abbr})</span></td>` +
-      `<td><div class="inline">
-          <button class="roll" type="button" data-rollchar="${c.key}" title="2d10+мод. мира">🎲</button>
-          <input data-key="base_${c.key}" type="number" min="1" max="100" class="char-base">
-        </div></td>` +
-      `<td><input data-key="adv_${c.key}" type="number" min="0" max="100" value="0"></td>` +
-      `<td><span class="val" id="val_${c.key}">—</span> <span class="fixsrc" id="fix_${c.key}"></span></td>` +
-      `<td><span class="bon" id="bon_${c.key}">—</span></td>`;
-    tb.appendChild(tr);
+    const card = document.createElement("div");
+    card.className = "stat";
+    card.dataset.stat = c.key;
+    card.innerHTML =
+      `<label>${c.name}</label><strong id="val_${c.key}">—</strong>` +
+      `<small><span id="roll_${c.key}">—</span> · <span id="fix_${c.key}"></span></small>`;
+    root.appendChild(card);
+    for (const prefix of ["base_", "adv_"]) {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.dataset.key = prefix + c.key;
+      if (prefix === "adv_") input.value = "0";
+      legacy.appendChild(input);
+    }
   }
-  tb.addEventListener("click", e => {
-    const b = e.target.closest("button[data-rollchar]");
-    if (!b) return;
-    const key = b.dataset.rollchar;
-    const world = curWorld();
-    const mod = world ? world.mods[key] : 0;
-    document.querySelector(`input[data-key="base_${key}"]`).value = d10() + d10() + mod;
-    sheetDirty = true;
-    flashSave();
-    recalc();
-    flash("бросок: 2d10" + fmtMod(mod));
-  });
 }
 const fmtMod = m => (m >= 0 ? "+" : "") + m;
 
@@ -96,53 +91,28 @@ function getVal(key) {
 /* ---------- пересчёт ---------- */
 function recalc() {
   const vals = {};
+  const world = curWorld();
   for (const c of CHARS) {
     const extra = charFixes(c.key).reduce((sum, f) => sum + f.v, 0);
-    const v = getVal(c.key) + extra;
+    const v = getVal(c.key) + (world ? world.mods[c.key] : 0) + extra;
     vals[c.key] = v;
     $("#val_" + c.key).textContent = v || "—";
-    $("#fix_" + c.key).textContent = v ? fixBreakdown(c.key) : "";
-    $("#bon_" + c.key).textContent = v ? Math.floor(v / 10) : "—";
+    $("#roll_" + c.key).textContent = $("input[data-key='base_" + c.key + "']").value || "—";
+    $("#fix_" + c.key).textContent = fixBreakdown(c.key);
   }
-
-  const ab = Math.floor(vals.ag / 10);
-  $("#movement").textContent = ab ? `${ab} · ${ab*2} · ${ab*3} · ${ab*6} м` : "—";
-  $("#fatigue").textContent = vals.t ? Math.floor(vals.t / 10) : "—";
-
-  const carrySum = Math.floor(vals.s / 10) + Math.floor(vals.t / 10);
-  const c = CARRY_TABLE[carrySum];
-  // отличаем пустые характеристики от реально введённых малых значений:
-  // сумма бонусов 0 при заполненных полях — легитимный случай (табл. строка 0)
-  const hasChars = vals.s > 0 || vals.t > 0;
-  $("#carry").textContent =
-    hasChars && c !== undefined
-      ? `перенос ${c} · подъём ${c*2} · толчок ${c*4} кг`
-      : (hasChars ? `${carrySum} — см. таблицу на стр. 208` : "—");
-
-  const career = CAREERS.find(x => x.id === $("#sel-career").value);
-  const wpb = Math.floor(vals.wp / 10);
-  // Пси-рейтинг: от профессии-псайкера (стартовый 1) или от купленного таланта «Пси-рейтинг …»
-  const psyRating = Math.max(
-    0,
-    ...$$("#talents-tbody select").map(s => {
-      const m = (s.value || "").match(/^Пси-рейтинг (\d+)/);
-      return m ? +m[1] : 0;
-    })
-  );
-  const isPsy = (career && career.psy) || psyRating > 0;
-  $("#psy").textContent = isPsy && wpb
-    ? `≈ ${Math.ceil(wpb / 2)} малых психосил` + (psyRating > 1 ? ` · Пси-рейтинг ${Math.max(psyRating, 1)}` : "")
-    : "—";
-  // Санкционирование проходили только Имперские Псайкеры
-  $("#btn-sanction").classList.toggle("hidden",
-    !(((career && career.id === "psy") || psyRating > 0) && $("#sel-world").value));
-
   const bio = curBio();
   const bioCost = bio ? bio.cost : 0;
-  $("#xpFree").textContent =
-    Math.max(0, num($("input[data-key=xpTotal]").value) - num($("input[data-key=xpSpent]").value) - bioCost);
+  const xpFree = Math.max(0, num($("input[data-key=xpTotal]").value) - num($("input[data-key=xpSpent]").value) - bioCost);
+  $("#xp-available").textContent = xpFree;
+  $("#xp-total-input").value = $("input[data-key=xpTotal]").value || "400";
+  $("#xp-spent-input").value = $("input[data-key=xpSpent]").value || "0";
 
   for (const tr of $("#skills-tbody").rows) calcSkillRow(tr);
+  renderSkillPreview();
+  renderTalentPreview();
+  renderProfile();
+  renderState();
+  renderGear();
   if (sheetDirty && !isApplying) flashSave();   // чистый только что загруженный лист не отправляем
 }
 
@@ -235,7 +205,8 @@ function calcSkillRow(tr) {
   const charTd = tr.children[1], goalTd = tr.children[3];
   if (!opt || !opt.dataset.char) { charTd.textContent = ""; goalTd.textContent = "—"; return; }
   charTd.textContent = CHARS.find(x => x.key === opt.dataset.char).abbr;
-  const base = getVal(opt.dataset.char) +
+  const world = curWorld();
+  const base = getVal(opt.dataset.char) + (world ? world.mods[opt.dataset.char] : 0) +
     charFixes(opt.dataset.char).reduce((sum, fix) => sum + fix.v, 0);
   let mod = 0, tag = "";
   let target = base;
@@ -254,6 +225,7 @@ function addTalentRow(name = "", note = "", src = "manual") {
 
   const sel = document.createElement("select");
   sel.dataset.key = "tl" + (++uidSeq) + "_n";
+  sel.className = "talent-name";
   // ВАЖНО: плейсхолдер добавляем ПЕРВЫМ — при добавлении опций в пустой select
   // первая опция автоматически становится выбранной (HTML spec), и вставка
   // плейсхолдера перед ней потом selectedIndex не сбрасывает
@@ -268,27 +240,31 @@ function addTalentRow(name = "", note = "", src = "manual") {
   const noteEl = document.createElement("input");
   noteEl.type = "text";
   noteEl.dataset.key = sel.dataset.key.replace("_n", "_x");
+  noteEl.className = "talent-note";
   noteEl.placeholder = "примечание / подтип";
-
-  const nameTd = document.createElement("td");
-  const mark = document.createElement("span");
-  mark.className = "bio-mark";
-  mark.textContent = "🛠️";
-  mark.hidden = src !== "bio";
-  nameTd.appendChild(mark);
-  nameTd.appendChild(sel);
-  const noteTd = document.createElement("td"); noteTd.appendChild(noteEl);
-  const delTd  = document.createElement("td"); delTd.className = "del";
-  delTd.innerHTML = `<button type="button">✕</button>`;
-  delTd.querySelector("button").onclick = () => { tr.remove(); sheetDirty = true; flashSave(); recalc(); };
-  tr.append(nameTd, noteTd, delTd);
+  const nameCell = document.createElement("td"); nameCell.appendChild(sel);
+  const sourceCell = document.createElement("td"); sourceCell.className = "talent-source";
+  sourceCell.textContent = src === "bio" ? "Предыстория" : "Вручную";
+  const noteCell = document.createElement("td"); noteCell.appendChild(noteEl);
+  const deleteCell = document.createElement("td");
+  const del = document.createElement("button"); del.type = "button"; del.className = "skill-delete"; del.textContent = "×";
+  del.setAttribute("aria-label", "Удалить талант");
+  del.onclick = () => { tr.remove(); sheetDirty = true; flashSave(); recalc(); };
+  deleteCell.appendChild(del);
+  tr.append(nameCell, sourceCell, noteCell, deleteCell);
   tb.appendChild(tr);
 
   if (name) sel.value = name;
   else sel.selectedIndex = 0;   // гарантируем «пусто» даже после истории опций
   noteEl.value = note;
-  sel.onchange   = () => { sheetDirty = true; flashSave(); recalc(); };   // Пси-рейтинг влияет на производные
-  noteEl.oninput = () => { sheetDirty = true; flashSave(); };
+  sel.onchange = () => {
+    if (src !== "bio") sourceCell.textContent = noteEl.value.trim() || "Вручную";
+    sheetDirty = true; flashSave(); recalc();
+  };
+  noteEl.oninput = () => {
+    if (src !== "bio") sourceCell.textContent = noteEl.value.trim() || "Вручную";
+    sheetDirty = true; flashSave();
+  };
 }
 
 /* ---------- оружие ---------- */
@@ -324,51 +300,10 @@ function addWeaponRow(values = null) {
 // при восстановлении/импорте (false) сохранённый ранг не затирается
 function showCareerKit(overwriteRank = true) {
   const c = CAREERS.find(x => x.id === $("#sel-career").value);
-  const w = curWorld();
-  const box = $("#career-kit");
   const rank = $("input[data-key=rank]");
-  if (!c && !w) {
-    box.hidden = true;
-    if (overwriteRank) rank.value = "";
-  } else {
-    box.hidden = false;
-
-    const careerCol =
-      `<div class="kit-col"><div class="kit-title">Профессия${c ? `: ${c.name}` : ""}</div>` +
-      (c
-        ? `Ранг: ${c.rank}\nБогатство: ${c.wealth}\n` +
-          `\nСтартовые умения:\n  • ${c.skills.join("\n  • ")}` +
-          `\n\nСтартовые таланты:\n  • ${c.talents.join("\n  • ")}` +
-          (c.gear && c.gear !== "—" ? `\n\nСтартовое имущество:\n  ${c.gear}` : "")
-        : "— профессия не выбрана") +
-      `</div>`;
-
-    let worldCol = `<div class="kit-col"><div class="kit-title">Родной мир${w ? `: ${w.name}` : ""}</div>`;
-    if (!w) {
-      worldCol += "— мир не выбран";
-    } else {
-      worldCol += `\nСтартовые Умения Уроженца Мира:\n` +
-        ((w.hwSkills && w.hwSkills.length)
-          ? `  • ${w.hwSkills.join("\n  • ")}`
-          : `  — отдельных умений нет (см. Особенности)`);
-      worldCol += `\n\nОсобенности Уроженцев Мира:\n` +
-        w.hwFeatures.map(f => `  ● ${f.n} — ${f.t}`).join("\n") +
-        (w.careerFix ? "\n\n  (+3 из Особенности «Годен» учтён в «Итоге» таблицы характеристик)" : "");
-    }
-    worldCol += `</div>`;
-
-    const headerText = c ? `Профессия: ${c.name} (ранг ${c.rank})` : "Профессия не выбрана";
-    const arrow = careerKitExpanded ? "▾" : "▸";
-    box.innerHTML =
-      `<button class="kit-toggle" type="button" aria-expanded="${careerKitExpanded}" aria-controls="career-kit-body">` +
-        `<span>${headerText}</span><span class="kit-toggle-arrow" aria-hidden="true">${arrow}</span>` +
-      `</button>` +
-      `<div id="career-kit-body" class="kit-body${careerKitExpanded ? "" : " collapsed"}"${careerKitExpanded ? "" : " hidden"}>` +
-        `<div class="kit-2col">${careerCol}${worldCol}</div>` +
-      `</div>`;
-
-    if (c && (overwriteRank || !rank.value)) rank.value = c.rank;
-  }
+  if (c && (overwriteRank || !rank.value)) rank.value = c.rank;
+  else if (!c && overwriteRank) rank.value = "";
+  renderProfile();
   recalc();
 }
 
@@ -379,7 +314,9 @@ const lookup = (table, roll) => {
 };
 const rollWounds = () => {
   const world = curWorld();
-  $("#wounds").value = d5() + (world ? world.wounds : 0);
+  const total = d5() + (world ? world.wounds : 0);
+  $("#state-wounds-total").value = total;
+  $("#state-wounds-current").value = total;
   recalc();
   saveSoon();
   flash("раны: d5" + fmtMod(world ? world.wounds : 0) + (world ? "" : " (мир не выбран)"));
@@ -388,41 +325,30 @@ const rollFate = () => {
   const world = curWorld();
   if (!world) return flash("сначала выбери родной мир");
   const n = d10(), pts = lookup(world.fate, n);
-  $("#fateTotal").value = pts;
-  $("#fateLeft").value  = pts;
+  $("#state-fate-total").value = pts;
+  $("#state-fate-current").value = pts;
   sheetDirty = true;
+  recalc();
   flashSave();
   flash(`судьба: d10=${n} → ${pts} очк.`);
 };
 const rollWealth = () => {
-  const c = CAREERS.find(x => x.id === $("#sel-career").value);
-  if (!c) return flash("сначала выбери профессию");
-  const m = c.wealth.match(/^(\d+)\+(\d+)d(\d+)$/);
-  let val = m ? +m[1] : +c.wealth;                   // сумма K отдельных бросков dN
-  if (m) for (let i = 0; i < +m[2]; i++) val += die(+m[3]);
+  const career = CAREERS.find(x => x.id === $("#sel-career").value);
+  if (!career) return flash("сначала выбери профессию");
+  const formula = career.wealth.match(/^(\d+)\+(\d+)d(\d+)$/);
+  let value = formula ? +formula[1] : +career.wealth;
+  if (formula) for (let i = 0; i < +formula[2]; i++) value += die(+formula[3]);
   const bio = curBio();
-  if (bio && bio.wealthMul) {
-    val = Math.floor(val * bio.wealthMul);
-    sheetDirty = true;
-    flashSave();
-    flash(`богатство: ${c.wealth} ×${bio.wealthMul} = ${val} тронов`);
-    $("#wealth").value = val;
-    return;
-  }
-  $("#wealth").value = val;
-  sheetDirty = true;
-  flashSave();
-  flash(`богатство: ${c.wealth} = ${val} тронов`);
+  if (bio && bio.wealthMul) value = Math.floor(value * bio.wealthMul);
+  $("#wealth-input").value = value;
+  sheetDirty = true; recalc(); flashSave();
+  flash(`богатство: ${career.wealth}${bio?.wealthMul ? ` ×${bio.wealthMul}` : ""} = ${value} тронов`);
 };
 const rollSanction = () => {
   const d100 = (d10() - 1) * 10 + d10();
   for (const range of Object.keys(SANCTIONS)) {
     const [a, b] = range.split("-").map(Number);
     if (d100 >= a && d100 <= b) {
-      const ta = $("textarea[data-key=notes]");
-      ta.value = (ta.value ? ta.value + "\n" : "") + `[санкционирование d100=${d100}] ${SANCTIONS[range]}`;
-      sheetDirty = true;
-      saveSoon();
       flash(`санкционирование: ${d100}`);
       return;
     }
@@ -432,7 +358,7 @@ const rollAllChars = () => {
   const world = curWorld();
   for (const c of CHARS) {
     const mod = world ? world.mods[c.key] : 0;
-    document.querySelector(`input[data-key="base_${c.key}"]`).value = d10() + d10() + mod;
+    document.querySelector(`input[data-key="base_${c.key}"]`).value = d10() + d10();
   }
   recalc();
   sheetDirty = true;
@@ -442,34 +368,57 @@ const rollAllChars = () => {
 };
 
 /* ---------- сериализация ---------- */
+const RETIRED_FIELDS = new Set(["player", "history", "contacts", "notes"]);
+function stripRetiredFields(data) {
+  const clean = { ...data };
+  for (const key of RETIRED_FIELDS) delete clean[key];
+  return clean;
+}
+
 function collect() {
   const data = {};
-  for (const el of $$("[data-key]")) data[el.dataset.key] = el.value ?? "";
+  for (const el of $$("[data-key]")) {
+    if (!RETIRED_FIELDS.has(el.dataset.key)) data[el.dataset.key] = el.value ?? "";
+  }
 
   // Экранирование служебных символов упаковки: \ → \\ , ; → \S , | → \P
   const escField = x => String(x ?? "")
     .replace(/\\/g, "\\\\").replace(/;/g, "\\S").replace(/\|/g, "\\P");
   const packRows = (tbody, mapFn, keepSingleEmpty = false) => {
     const rows = [];
-    for (const tr of tbody.rows) {
+    for (const tr of (tbody.rows ? Array.from(tbody.rows) : Array.from(tbody.children))) {
       const t = mapFn(tr).map(escField);
       if (t.some(x => x.trim() !== "")) rows.push(t.join("|"));
     }
-    if (keepSingleEmpty && !rows.length && tbody.rows.length === 1)
-      rows.push(mapFn(tbody.rows[0]).map(escField).join("|"));
+    const children = tbody.rows ? Array.from(tbody.rows) : Array.from(tbody.children);
+    if (keepSingleEmpty && !rows.length && children.length === 1)
+      rows.push(mapFn(children[0]).map(escField).join("|"));
     return rows.join(";");
   };
   data.__skills = packRows($("#skills-tbody"),
     tr => [tr.children[0].lastChild.value, tr.children[2].firstChild.value, tr.dataset.src || "manual"]);
   data.__talents = packRows($("#talents-tbody"),
-    tr => [tr.children[0].lastChild.value, tr.children[1].firstChild.value, tr.dataset.src || "manual"]);
+    tr => [tr.querySelector(".talent-name").value, tr.querySelector(".talent-note").value, tr.dataset.src || "manual"]);
   data.bioId = $("#sel-bio").value;
   data.__weapons = packRows($("#weapons-tbody"),
     tr => Array.from(tr.children).slice(0, 9).map(td => td.firstChild.value), true);
-  return data;
+  data.__gearItems = JSON.stringify(gearItems);
+  data.__gearMigrated = "1";
+  data.__statsRaw = "1";
+  return stripRetiredFields(data);
 }
 
 function apply(data) {
+  data = stripRetiredFields(data || {});
+  if (data.__statsRaw !== "1") {
+    const storedWorld = WORLDS.find(world => world.id === data.world);
+    for (const c of CHARS) {
+      const key = `base_${c.key}`;
+      if (storedWorld && data[key] != null && String(data[key]).trim() !== "")
+        data[key] = String(num(data[key]) - storedWorld.mods[c.key]);
+    }
+    data.__statsRaw = "1";
+  }
   const wasApplying = isApplying;
   isApplying = true;
   try {
@@ -483,39 +432,60 @@ function apply(data) {
       .map(t => t.split("|").map(unescField));
     for (const parts of unpack(data.__skills)) {
       const [name, lvl, src] = parts;
-      addSkillRow(name, lvl || "untrained", src === "bio" ? "bio" : "manual");
+      if (name) addSkillRow(name, lvl || "untrained", src === "bio" ? "bio" : "manual");
     }
     for (const parts of unpack(data.__talents)) {
       const [name, note, src] = parts;
-      addTalentRow(name, note || "", src === "bio" ? "bio" : "manual");
+      if (name || note) addTalentRow(name, note || "", src === "bio" ? "bio" : "manual");
     }
-    for (const fields of unpack(data.__weapons)) addWeaponRow({ name: fields[0], cls: fields[1], dmg: fields[2], dtyp: fields[3], pen: fields[4], rng: fields[5], clip: fields[6], rld: fields[7], spec: fields[8] });
+    for (const fields of unpack(data.__weapons)) if (fields.some(Boolean)) addWeaponRow({ name: fields[0], cls: fields[1], dmg: fields[2], dtyp: fields[3], pen: fields[4], rng: fields[5], clip: fields[6], rld: fields[7], spec: fields[8] });
 
     // значения статичных полей
     // пропускаем только динамические ключи строк таблиц (sk1, sk1_lvl, tl1_n, tl1_x,
     // w1 — оружие) и упакованные __skills/__talents/__weapons.
     // base_*/adv_* и world/wounds/wealth — обычные статичные поля, их restored-им.
     const dynamic = /^(sk\d|tl\d|w\d|__)/;
+    for (const el of $$("[data-key]")) {
+      if (dynamic.test(el.dataset.key)) continue;
+      el.value = el.dataset.key.startsWith("adv_") ? "0" : (el.dataset.key === "xpTotal" ? "400" : "");
+    }
     for (const [k, v] of Object.entries(data)) {
       if (dynamic.test(k)) continue;
+      if (k.startsWith("__")) continue;
       const el = document.querySelector(`[data-key="${CSS.escape(k)}"]`);
       if (el) el.value = v;
     }
     $("input[data-key=xpTotal]").value = data.xpTotal ?? "400";
+    if (data.woundsCurrent == null || data.woundsCurrent === "")
+      $("#state-wounds-current").value = data.wounds || "0";
+    if (data.fatigueCurrent == null || data.fatigueCurrent === "")
+      $("#state-fatigue").value = "0";
+    $("#sel-bio").dataset.prev = "";
+    populateBioSelect();
+    $("#sel-bio").value = "";
+    try {
+      const parsedGear = JSON.parse(data.__gearItems || "[]");
+      gearItems = Array.isArray(parsedGear) ? parsedGear.filter(x => x && typeof x.name === "string") : [];
+    } catch { gearItems = []; }
+    if (data.__gearMigrated !== "1") {
+      const names = new Set(gearItems.map(item => item.name.trim().toLocaleLowerCase("ru")));
+      for (const item of readLegacyGearItems()) {
+        const key = item.name.trim().toLocaleLowerCase("ru");
+        if (!names.has(key)) { gearItems.push(item); names.add(key); }
+      }
+    }
     // после восстановления полей применяем сохранённую биографию, если она ещё доступна
     const savedBioId = data.bioId || "";
     if (savedBioId) {
       const career = $("#sel-career").value;
       const bio = BIOGRAPHIES.find(b => b.id === savedBioId && b.career === career);
       if (bio) {
-        // опции #sel-bio зависят от профессии — перезаполнить до установки значения
-        populateBioSelect();
         $("#sel-bio").value = savedBioId;
         $("#sel-bio").dataset.prev = savedBioId;
         addBioRows(savedBioId, true);
       }
     }
-    showCareerKit(false);
+    renderNotes();
     recalc();
     updateBioStatus();
   } finally {
@@ -529,12 +499,13 @@ let saveInFlight = null;
 function flash(msg) { $("#save-status").textContent = msg; }
 
 function renderCharList(chars) {
-  const sel = $("#char-list");
-  sel.innerHTML = `<option value=""${chars.length ? " hidden" : ""}>— выбрать персонажа —</option>`;
+  const sel = $("#sheet-switcher");
+  sel.replaceChildren();
+  if (!chars.length) sel.appendChild(new Option("Нет листов", ""));
   for (const c of chars) {
     const opt = document.createElement("option");
     opt.value = c.id;
-    opt.textContent = `#${c.id} ${c.name}`;
+    opt.textContent = c.name || `Безымянный #${c.id}`;
     sel.appendChild(opt);
   }
   if (currentCharId) sel.value = currentCharId;
@@ -548,16 +519,14 @@ function syncDeleteButton() {
 }
 
 function updateCharListOption(id, name) {
-  const sel = $("#char-list");
+  const sel = $("#sheet-switcher");
   let opt = sel.querySelector(`option[value="${CSS.escape(String(id))}"]`);
   if (!opt) {
     opt = document.createElement("option");
     opt.value = id;
     sel.appendChild(opt);
   }
-  opt.textContent = `#${id} ${name || "Безымянный"}`;
-  const placeholder = sel.querySelector('option[value=""]');
-  if (placeholder) placeholder.hidden = true;
+  opt.textContent = name || `Безымянный #${id}`;
   sel.value = String(id);
 }
 
@@ -582,16 +551,18 @@ async function loadCharacter(id) {
     const r = await fetch(`${API_PREFIX}/characters/${id}`);
     if (!r.ok) throw new Error(r.status);
     const rec = await r.json();
-    sheetDirty = false;
+    const cleanData = stripRetiredFields(rec.data || {});
+    const needsDataMigration = Object.keys(rec.data || {}).some(key => RETIRED_FIELDS.has(key)) || rec.data?.__gearMigrated !== "1" || rec.data?.__statsRaw !== "1";
+    sheetDirty = needsDataMigration;
     isApplying = true;
-    apply(rec.data);
+    apply(cleanData);
     isApplying = false;
     currentCharId = String(rec.id);
     try { localStorage.setItem(activeCharStorageKey(), currentCharId); } catch (e) {}
-    $("#char-list").value = currentCharId;
-    sheetDirty = false;
+    $("#sheet-switcher").value = currentCharId;
     syncDeleteButton();
-    flash("загружен персонаж");
+    if (needsDataMigration) flashSave();
+    else { sheetDirty = false; flash("загружен персонаж"); }
     return true;
   } catch (e) {
     flash("не удалось загрузить персонажа");
@@ -638,7 +609,7 @@ async function saveToServer(force = false) {
       const rec = await r.json();
       currentCharId = String(rec.id);
       if (previousId && previousId !== currentCharId) {
-        const staleOption = $("#char-list").querySelector(`option[value="${CSS.escape(previousId)}"]`);
+        const staleOption = $("#sheet-switcher").querySelector(`option[value="${CSS.escape(previousId)}"]`);
         if (staleOption) staleOption.remove();
       }
       try { localStorage.setItem(activeCharStorageKey(), currentCharId); } catch (e) {}
@@ -671,25 +642,32 @@ function emptySheetData() {
   const data = {};
   for (const el of $$("[data-key]")) {
     const key = el.dataset.key;
-    if (!/^(sk\d|tl\d|w\d|__)/.test(key)) data[key] = "";
+    if (/^(sk\d|tl\d|w\d|__)/.test(key)) continue;
+    data[key] = key.startsWith("adv_") ? "0" : "";
   }
   data.xpTotal = "400";
   data.bioId = "";
-  data.__skills = "|untrained|manual";
-  data.__talents = "||manual";
-  data.__weapons = Array(9).fill("").join("|");
+  data.__skills = "";
+  data.__talents = "";
+  data.__weapons = "";
+  data.__gearItems = "[]";
+  data.__gearMigrated = "1";
+  data.__statsRaw = "1";
+  data.woundsCurrent = "";
+  data.fatigueCurrent = "0";
+  data.status = "";
   return data;
 }
 
 async function deleteCharacter(id) {
   if (!id) return false;
   const deletingActive = String(id) === String(currentCharId);
-  let targetId = String(id);
   const prompt = deletingActive
-    ? "Удалить персонажа из базы вместе с несохранёнными изменениями?"
-    : "Удалить выбранного персонажа из базы?";
+    ? "Устранить персонажа вместе с несохранёнными изменениями?"
+    : "Устранить выбранного персонажа?";
   if (!confirm(prompt)) return false;
 
+  if (!deletingActive && sheetDirty && !await saveToServer()) return false;
   suppressAutosave = true;
   clearTimeout(saveTimer);
   try {
@@ -697,22 +675,48 @@ async function deleteCharacter(id) {
       flash("не удалось завершить сохранение; персонаж не удалён");
       return false;
     }
-    if (deletingActive && currentCharId) targetId = String(currentCharId);
-    const r = await fetch(`${API_PREFIX}/characters/${targetId}`, { method: "DELETE" });
+    const r = await fetch(`${API_PREFIX}/characters/${id}`, { method: "DELETE" });
     if (!r.ok) throw new Error(r.status);
     if (deletingActive) {
       currentCharId = null;
       sheetDirty = false;
-      try {
-        localStorage.removeItem(activeCharStorageKey());
-      } catch (e) { /* хранилище недоступно */ }
       apply(emptySheetData());
     }
-    await loadCharList();
-    syncDeleteButton();
-    flash(deletingActive ? "персонаж удалён; открыт чистый лист" : "персонаж удалён");
+    try {
+      localStorage.removeItem(activeCharStorageKey());
+      localStorage.removeItem(LS_ID_KEY);
+      localStorage.removeItem(LS_SHEET_KEY);
+      localStorage.setItem(LS_MIGRATED_KEY, "1");
+    } catch (e) { /* хранилище недоступно */ }
+
+    const chars = await loadCharList();
+    if (!chars) throw new Error("character list unavailable");
+    const lastCharacter = chars[chars.length - 1];
+    if (lastCharacter) {
+      sheetDirty = false;
+      if (!await loadCharacter(lastCharacter.id)) throw new Error("last character unavailable");
+      flash("персонаж удалён; открыт последний в списке");
+    } else {
+      const data = emptySheetData();
+      const create = await fetch(`${API_PREFIX}/characters`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!create.ok) throw new Error(create.status);
+      const record = await create.json();
+      currentCharId = String(record.id);
+      try { localStorage.setItem(activeCharStorageKey(), currentCharId); } catch (e) {}
+      sheetDirty = false;
+      apply(data);
+      await loadCharList();
+      $("#sheet-switcher").value = currentCharId;
+      syncDeleteButton();
+      flash("последний персонаж удалён; создан пустой лист");
+    }
     return true;
   } catch (e) {
+    if (deletingActive && !currentCharId) apply(emptySheetData());
     flash("не удалось удалить персонажа");
     return false;
   } finally {
@@ -770,7 +774,7 @@ function importXML(file) {
       return flash("это не XML листа Dark Heresy — импорт отменён");
     const data = {};
     for (const f of doc.querySelectorAll("f")) data[f.getAttribute("k")] = f.getAttribute("v") ?? "";
-    apply(data);
+    apply(stripRetiredFields(data));
     sheetDirty = true;
     flashSave();
     flash("XML импортирован ✓");
@@ -805,81 +809,31 @@ function hcardHtml(name, meta, desc) {
     `<div class="hdesc ${desc ? "" : "muted"}">${desc ? esc(desc) : "описания нет в справочнике."}</div></div>`;
 }
 function buildHint() {
-  const parts = [];
-
-  // умения: строки могут дублироваться (вручную + биография) — оставляем первую,
-  // цели теста объединяем
-  const skMap = new Map();
-  for (const tr of $("#skills-tbody").rows) {
-    const sel = tr.children[0].querySelector("select");
-    const name = sel.value;
-    if (!name) continue;
-    const opt = sel.selectedOptions[0];
-    const meta = opt && opt.dataset.char
-      ? `${opt.dataset.type === "b" ? "Базовое" : "Продвинутое"} умение, тест по ${CHARS.find(x => x.key === opt.dataset.char).name}`
-      : "характеристика не определена";
-    const goal = tr.children[3].textContent.trim();
-    let e = skMap.get(name);
-    if (!e) skMap.set(name, { name, meta, goals: goal ? [goal] : [] });
-    else if (goal && !e.goals.includes(goal)) e.goals.push(goal);
-  }
-  const sk = [...skMap.values()]
-    .sort((a, b) => a.name.localeCompare(b.name, "ru"))
-    .map(e => hcardHtml(e.name, e.meta + (e.goals.length ? ` · цель Теста: ${e.goals.join(" / ")}` : ""), findSkillText(e.name)));
-  parts.push(`<div class="hgroup"><h3>Умения</h3>` +
-    (sk.length ? `<div class="hcards">${sk.join("")}</div>` : `<p class="muted">— ничего не добавлено</p>`) + `</div>`);
-
-  // таланты: дубликаты (вручную + биография) объединяем, заметки сливаем
-  const tlMap = new Map();
-  for (const tr of $("#talents-tbody").rows) {
+  const root = $("#dossier-summary");
+  root.replaceChildren();
+  const section = (title, className, values) => {
+    const box = document.createElement("section"); box.className = `brief-section ${className}`;
+    const heading = document.createElement("h3"); heading.textContent = title; box.appendChild(heading);
+    if (typeof values === "string") {
+      const p = document.createElement("p"); p.textContent = values || "Записей нет."; box.appendChild(p);
+    } else if (values.length) {
+      const list = document.createElement("ul");
+      for (const value of values) { const li = document.createElement("li"); li.textContent = value; list.appendChild(li); }
+      box.appendChild(list);
+    } else {
+      const p = document.createElement("p"); p.className = "brief-empty"; p.textContent = "Записей нет."; box.appendChild(p);
+    }
+    root.appendChild(box);
+  };
+  section("Идентификация", "brief-identity", `${$("#char-name").textContent} · ${$("#char-rank").textContent} · ${$("#char-career").textContent} · ${$("#char-world").textContent} · ${$("#char-age").textContent} · ${$("#char-status").textContent}`);
+  section("Характеристики", "brief-stats", CHARS.map(c => `${c.name}: ${$("#val_" + c.key).textContent} · выпало ${$("#roll_" + c.key).textContent} · ${$("#fix_" + c.key).textContent}`));
+  const skills = Array.from($("#skills-tbody").rows).map(tr => {
     const name = tr.children[0].querySelector("select").value;
-    if (!name) continue;
-    const note = tr.children[1].firstChild.value.trim();
-    let e = tlMap.get(name);
-    if (!e) tlMap.set(name, { name, notes: note ? [note] : [] });
-    else if (note && !e.notes.includes(note)) e.notes.push(note);
-  }
-  const tl = [...tlMap.values()]
-    .sort((a, b) => a.name.localeCompare(b.name, "ru"))
-    .map(e => {
-      const text = findTalentText(e.name);
-      return hcardHtml(e.name,
-        e.notes.length ? `заметка: ${e.notes.join(" · ")}` : "",
-        text || "см. гл. IV книги; подтипы групповых талантов уточняй в скобках.");
-    });
-  parts.push(`<div class="hgroup"><h3>Таланты и способности</h3>` +
-    (tl.length ? `<div class="hcards">${tl.join("")}</div>` : `<p class="muted">— ничего не добавлено</p>`) + `</div>`);
-
-  // оружие (из введённых характеристик)
-  let wp = [];
-  for (const tr of $("#weapons-tbody").rows) {
-    const f = {};
-    for (let i = 0; i < 9; i++) f[W_FIELDS[i][0]] = tr.children[i].firstChild.value.trim();
-    if (!f.name) continue;
-    const stats = [
-      f.cls && `класс: ${f.cls}`,
-      f.dmg && `урон: ${f.dmg}`,
-      f.dtyp && `тип: ${f.dtyp}`,
-      f.pen && `пробитие: ${f.pen}`,
-      f.rng && `дальность: ${f.rng}`,
-      f.clip && `обойма: ${f.clip}`,
-      f.rld && `перезарядка: ${f.rld}`,
-      f.spec && `особое: ${f.spec}`
-    ].filter(Boolean).join(", ");
-    wp.push(`<li><b>${esc(f.name)}</b> — ${stats ? esc(stats) : "характеристики не заполнены (см. Арсенал, гл. V)"}.`);
-  }
-  parts.push(`<div class="hgroup"><h3>Оружие</h3>` +
-    (wp.length ? `<ul>${wp.join("")}</ul>` : `<p class="muted">— ничего не добавлено</p>`) + `</div>`);
-
-  // снаряжение (текст из поля «Имущество»)
-  const gearLines = ($("textarea[data-key=gear]").value || "")
-    .split(/[;\n]/).map(s => s.trim()).filter(Boolean);
-  parts.push(`<div class="hgroup"><h3>Снаряжение</h3>` +
-    (gearLines.length
-      ? `<ul>${gearLines.map(g => `<li>${esc(g)} <span class="muted">— см. Главу V: Арсенал</span></li>`).join("")}</ul>`
-      : `<p class="muted">— поле имущества пусто</p>`) + `</div>`);
-
-  $("#hint-box").innerHTML = parts.join("");
+    return name ? `${name} · ${tr.children[2].querySelector("select").selectedOptions[0]?.textContent || ""} · цель ${tr.children[3].textContent}` : "";
+  }).filter(Boolean);
+  section("Умения", "brief-skills", skills);
+  section("Таланты и способности", "brief-talents", Array.from($("#talents-tbody").children).map(row => row.querySelector(".talent-name").value).filter(Boolean));
+  section("Арсенал и имущество", "brief-gear", Array.from($("#gear-preview-list").children).filter(x => x.classList.contains("item")).map(x => x.textContent.trim()));
   flash("справка обновлена " + new Date().toLocaleTimeString("ru"));
 }
 
@@ -910,15 +864,17 @@ function bioDescription(bio) {
 
 function updateBioStatus() {
   const bio = curBio();
-  $("#bio-status").textContent = bio
+  const description = bio
     ? `${bio.cost} ОО · ${bioDescription(bio)}`
     : ($("#sel-career").value ? "не куплена" : "выбери профессию");
+  $("#bio-status").textContent = description;
+  $("#bio-status").title = description;
 }
 
 /* удалить все строки, добавленные текущей биографией */
 function clearBioRows() {
   for (const tr of $$("#skills-tbody tr[data-src='bio']")) tr.remove();
-  for (const tr of $$("#talents-tbody tr[data-src='bio']")) tr.remove();
+  for (const tr of $$("#talents-tbody [data-src='bio']")) tr.remove();
 }
 
 /* добавить строки по id биографии;
@@ -929,7 +885,7 @@ function addBioRows(id, skipExisting = false) {
   const existing = new Set();
   if (skipExisting) {
     for (const tr of $$("#skills-tbody tr[data-src='bio']")) existing.add(tr.children[0].lastChild.value);
-    for (const tr of $$("#talents-tbody tr[data-src='bio']")) existing.add(tr.children[0].lastChild.value);
+    for (const tr of $$("#talents-tbody [data-src='bio']")) existing.add(tr.querySelector(".talent-name").value);
   }
   for (const s of (bio.skills || [])) if (!skipExisting || !existing.has(s)) addSkillRow(s, "untrained", "bio");
   for (const s of (bio.skillBasic || [])) if (!skipExisting || !existing.has(s)) addSkillRow(s, "basic", "bio");
@@ -952,6 +908,8 @@ function onCareerChange() {
   if (oldBio && oldBio.career === careerId) $("#sel-bio").value = oldBioId;
   updateBioStatus();
   showCareerKit(true);
+  sheetDirty = true;
+  flashSave();
 }
 
 function onBioChange() {
@@ -994,170 +952,439 @@ function onBioChange() {
   flash(`куплена биография: ${bio.name} (−${bio.cost} ОО)`);
 }
 
+function setSkillMode(mode) {
+  const managing = mode === "manage";
+  $("#skill-overview").hidden = managing;
+  $("#skill-management").hidden = !managing;
+  $("#skill-section-row").classList.toggle("managing", managing);
+  $("#dashboard-grid").classList.toggle("managing", managing);
+  $("#dashboard-grid").classList.remove("talent-managing");
+  if (managing) renderSkillPreview();
+}
+
+function setTalentMode(managing) {
+  $("#talent-overview").hidden = managing;
+  $("#talent-management").hidden = !managing;
+  $("#skill-section-row").classList.toggle("talent-managing", managing);
+  $("#dashboard-grid").classList.toggle("managing", managing);
+  $("#dashboard-grid").classList.toggle("talent-managing", managing);
+  if (managing) renderTalentPreview();
+}
+
+function renderSkillPreview() {
+  const basicRoot = $("#skill-preview-basic"), trainedRoot = $("#skill-preview-trained");
+  basicRoot.replaceChildren();
+  trainedRoot.replaceChildren();
+  let count = 0;
+  for (const tr of $("#skills-tbody").rows) {
+    const nameSelect = tr.children[0].querySelector("select");
+    const levelSelect = tr.children[2].querySelector("select");
+    const name = nameSelect.value;
+    if (!name) continue;
+    count++;
+    const level = levelSelect.value;
+    const targetRoot = level === "basic" ? basicRoot : trainedRoot;
+    const item = document.createElement("div"); item.className = "skill-preview";
+    const meta = document.createElement("div"); meta.className = "skill-preview-meta";
+    const title = document.createElement("span"); title.textContent = name;
+    const levelLabel = document.createElement("small"); levelLabel.textContent = levelSelect.selectedOptions[0]?.textContent || "";
+    meta.append(title, levelLabel);
+    const attr = tr.children[1].textContent.trim();
+    const characteristic = document.createElement("span"); characteristic.className = "skill-characteristic"; characteristic.textContent = attr || "—";
+    const score = document.createElement("strong"); score.textContent = tr.children[3].textContent.trim() || "—";
+    item.append(meta, characteristic, score);
+    targetRoot.appendChild(item);
+  }
+  $("#skill-count").textContent = String(count);
+  if (!basicRoot.children.length) basicRoot.innerHTML = '<p class="skill-empty">Нет базовых навыков.</p>';
+  if (!trainedRoot.children.length) trainedRoot.innerHTML = '<p class="skill-empty">Нет обученных навыков.</p>';
+}
+
+function renderTalentPreview() {
+  const root = $("#talent-preview-list");
+  root.replaceChildren();
+  for (const tr of $("#talents-tbody").rows) {
+    const name = tr.querySelector(".talent-name").value;
+    if (!name) continue;
+    const item = document.createElement("div"); item.className = "talent-row";
+    const title = document.createElement("span"); title.textContent = name;
+    const source = document.createElement("small");
+    source.textContent = tr.dataset.src === "bio" ? "Предыстория" : (tr.querySelector(".talent-note").value.trim() || "Вручную");
+    item.append(title, source); root.appendChild(item);
+  }
+  if (!root.children.length) root.innerHTML = '<p class="skill-empty">Таланты не добавлены.</p>';
+}
+
+function renderProfile() {
+  const value = key => $("[data-key='" + key + "']")?.value || "";
+  const career = CAREERS.find(x => x.id === value("career"));
+  const world = WORLDS.find(x => x.id === value("world"));
+  const bio = curBio();
+  $("#char-name").textContent = value("name") || "Безымянный аколит";
+  $("#char-rank").textContent = value("rank") || career?.rank || "—";
+  $("#char-age").textContent = value("age") ? `${value("age")} стандартных лет` : "—";
+  $("#char-status").textContent = value("status") || "—";
+  $("#char-career").textContent = career?.name || "Профессия не выбрана";
+  $("#char-world").textContent = world?.name || "Мир не выбран";
+  $("#char-bio").textContent = bio?.name || "—";
+  $("#creation-summary").textContent = [world?.name, career?.name, bio?.name].filter(Boolean).join(" · ") || "Выбери мир, профессию и биографию";
+}
+
+function renderState() {
+  const woundsMax = Math.max(0, num($("#state-wounds-total").value));
+  const wounds = Math.max(0, Math.min(woundsMax, num($("#state-wounds-current").value)));
+  const fateMax = Math.max(0, num($("#state-fate-total").value));
+  const fate = Math.max(0, Math.min(fateMax, num($("#state-fate-current").value)));
+  const fatigue = Math.max(0, num($("#state-fatigue").value));
+  $("#state-wounds-current").value = wounds;
+  $("#state-fate-current").value = fate;
+  $("#state-fatigue").value = fatigue;
+  $("#wounds-current").textContent = wounds;
+  $("#wounds-total").textContent = woundsMax;
+  $("#fate-current").textContent = fate;
+  $("#fate-total").textContent = fateMax;
+  $("#insanity-value").textContent = num($("#state-insanity").value);
+  $("#corruption-value").textContent = num($("#state-corruption").value);
+  $("#fatigue-value").textContent = fatigue;
+  $("#wealth-value").textContent = num($("#wealth-input").value);
+  $("#wounds-meter").style.width = `${woundsMax ? Math.min(100, wounds / woundsMax * 100) : 0}%`;
+  $("#fate-meter").style.width = `${fateMax ? Math.min(100, fate / fateMax * 100) : 0}%`;
+}
+
+const NOTE_BLOCKS = {
+  dossier: { field: "dossier", text: "#dossier-text", editor: "#dossier-editor", input: "#dossier-input" },
+  merit: { field: "meritNotes", text: "#merit-text", editor: "#merit-editor", input: "#merit-input" },
+  field: { field: "fieldNotes", text: "#field-text", editor: "#field-editor", input: "#field-input" },
+};
+
+function renderNotes() {
+  for (const [key, config] of Object.entries(NOTE_BLOCKS)) {
+    const value = $(`[data-key="${config.field}"]`).value.trim();
+    const text = $(config.text);
+    text.textContent = value || "Записей нет.";
+    text.classList.remove("expanded");
+    const more = $(`[data-note-more="${key}"]`);
+    more.hidden = value.length < 180;
+    more.textContent = "Подробнее";
+  }
+}
+
+function openNoteEditor(key) {
+  const config = NOTE_BLOCKS[key];
+  $(config.input).value = $(`[data-key="${config.field}"]`).value;
+  $(config.editor).hidden = false;
+  $(config.input).focus();
+}
+
+function cancelNoteEditor(key) {
+  $(NOTE_BLOCKS[key].editor).hidden = true;
+}
+
+function saveNoteEditor(key) {
+  const config = NOTE_BLOCKS[key];
+  $(`[data-key="${config.field}"]`).value = $(config.input).value.trim();
+  $(config.editor).hidden = true;
+  renderNotes(); sheetDirty = true; flashSave();
+}
+
+function toggleNoteExpanded(key) {
+  const config = NOTE_BLOCKS[key];
+  const text = $(config.text), more = $(`[data-note-more="${key}"]`);
+  const expanded = text.classList.toggle("expanded");
+  more.textContent = expanded ? "Свернуть" : "Подробнее";
+}
+
+function readLegacyGearItems() {
+  const items = [];
+  for (const tr of $("#weapons-tbody").rows) {
+    const f = Array.from(tr.children).slice(0, 9).map(td => td.firstChild.value.trim());
+    if (!f[0]) continue;
+    const stats = [f[2], f[3], f[4] && `Пен ${f[4]}`, f[5] && `дист. ${f[5]}`, f[6] && `обойма ${f[6]}`, f[7] && `перезарядка ${f[7]}`, f[8]].filter(Boolean).join(" · ");
+    items.push({ name: f[0], type: f[1] ? `Оружие · ${f[1]}` : "Оружие", stats, source: "legacy-weapon" });
+  }
+  const armorLabels = [["arm-h", "Голова"], ["arm-b", "Тело"], ["arm-la", "Левая рука"], ["arm-ra", "Правая рука"], ["arm-ll", "Левая нога"], ["arm-rl", "Правая нога"]];
+  for (const [key, label] of armorLabels) {
+    const value = $(`[data-key="${key}"]`).value.trim();
+    if (value) items.push({ name: label, type: "Броня", stats: `Защита ${value}`, source: `legacy-${key}` });
+  }
+  const legacyGear = $("textarea[data-key=gear]").value;
+  for (const line of legacyGear.split(/[;\n]+/).map(x => x.trim()).filter(Boolean))
+    items.push({ name: line, type: "Имущество", stats: "", source: "legacy-gear" });
+  return items;
+}
+
+function renderGear() {
+  const preview = $("#gear-preview-list"), rows = $("#gear-rows");
+  const visible = gearItems.map((item, index) => ({ ...item, editable: true, index }));
+  preview.replaceChildren();
+  rows.replaceChildren();
+  for (const item of visible) {
+    const card = document.createElement("div"); card.className = "item";
+    const info = document.createElement("div"), name = document.createElement("b"), type = document.createElement("small"), stats = document.createElement("em");
+    name.textContent = item.name; type.textContent = item.type || "Предмет"; stats.textContent = item.stats || "";
+    info.append(name, type); card.append(info, stats); preview.appendChild(card);
+    const tr = document.createElement("tr");
+    for (const key of ["name", "type", "stats"]) {
+      const td = document.createElement("td"), input = document.createElement("input");
+      input.className = "gear-edit-input"; input.value = item[key] || ""; input.setAttribute("aria-label", key);
+      if (item.editable) input.addEventListener("change", () => { gearItems[item.index][key] = input.value.trim(); sheetDirty = true; flashSave(); renderGear(); });
+      td.appendChild(input); tr.appendChild(td);
+    }
+    const delCell = document.createElement("td"), del = document.createElement("button");
+    del.type = "button"; del.className = "skill-delete"; del.textContent = "×"; del.setAttribute("aria-label", `Удалить ${item.name}`);
+    if (item.editable) del.onclick = () => { gearItems.splice(item.index, 1); sheetDirty = true; flashSave(); renderGear(); };
+    delCell.appendChild(del); tr.appendChild(delCell); rows.appendChild(tr);
+  }
+  $("#gear-count").textContent = String(visible.length);
+  if (!visible.length) preview.innerHTML = '<p class="skill-empty">Снаряжение не записано.</p>';
+}
+
+function setGearMode(managing) {
+  $("#gear-overview").hidden = managing;
+  $("#gear-management").hidden = !managing;
+  $("#secondary-grid").classList.toggle("managing", managing);
+  if (managing) renderGear();
+}
+
+function toggleStateEditor(force) {
+  const editor = $("#state-editor"), open = typeof force === "boolean" ? force : editor.hidden;
+  editor.hidden = !open;
+  if (open) {
+    stateEditorSnapshot = {
+      wounds: $("#state-wounds-total").value, woundsCurrent: $("#state-wounds-current").value,
+      fateTotal: $("#state-fate-total").value, fateLeft: $("#state-fate-current").value,
+      insanity: $("#state-insanity").value, corruption: $("#state-corruption").value,
+      fatigueCurrent: $("#state-fatigue").value,
+    };
+  } else if (stateEditorSnapshot) {
+    const selectors = { wounds: "#state-wounds-total", woundsCurrent: "#state-wounds-current", fateTotal: "#state-fate-total", fateLeft: "#state-fate-current", insanity: "#state-insanity", corruption: "#state-corruption", fatigueCurrent: "#state-fatigue" };
+    for (const [key, selector] of Object.entries(selectors)) $(selector).value = stateEditorSnapshot[key];
+    stateEditorSnapshot = null; sheetDirty = true; recalc(); flashSave();
+  }
+}
+
+function saveState() {
+  const woundsMax = Math.max(0, num($("#state-wounds-total").value));
+  $("#state-wounds-current").value = Math.min(woundsMax, Math.max(0, num($("#state-wounds-current").value)));
+  const fateMax = Math.max(0, num($("#state-fate-total").value));
+  $("#state-fate-current").value = Math.min(fateMax, Math.max(0, num($("#state-fate-current").value)));
+  $("#state-fatigue").value = Math.max(0, num($("#state-fatigue").value));
+  $("#state-editor").hidden = true;
+  stateEditorSnapshot = null;
+  sheetDirty = true; recalc(); flashSave();
+}
+
+function saveWealth() {
+  const details = $("#wealth-input").closest("details");
+  if (details) details.open = false;
+  sheetDirty = true; recalc(); flashSave();
+}
+
+function adjustState(key, delta) {
+  const map = { wounds: ["#state-wounds-current", "#state-wounds-total"], fate: ["#state-fate-current", "#state-fate-total"], fatigue: ["#state-fatigue", null] };
+  const [valueSelector, maxSelector] = map[key];
+  const input = $(valueSelector), max = maxSelector ? num($(maxSelector).value) : Infinity;
+  input.value = Math.max(0, Math.min(max, num(input.value) + delta));
+  sheetDirty = true; recalc(); flashSave();
+}
+
+function rollMaxState() {
+  rollWounds();
+  rollFate();
+  $("#state-roll-note").textContent = "Максимум ран и очки судьбы определены по выбранному миру.";
+}
+
+function openProfileEdit() {
+  profileEditorSnapshot = Object.fromEntries(["name", "rank", "age", "status"].map(key => [key, $(`[data-key="${key}"]`).value]));
+  $("#profile-editor").hidden = false;
+  $("#profile-name").focus();
+}
+
+function closeProfileEdit() { $("#profile-editor").hidden = true; }
+
+function cancelProfileEdit() {
+  if (profileEditorSnapshot) {
+    for (const [key, value] of Object.entries(profileEditorSnapshot)) $(`[data-key="${key}"]`).value = value;
+    profileEditorSnapshot = null; sheetDirty = true; recalc(); flashSave();
+  }
+  closeProfileEdit();
+}
+
+function saveProfile() {
+  if (!$("#profile-name").value.trim()) { $("#profile-name").focus(); return; }
+  profileEditorSnapshot = null; closeProfileEdit(); sheetDirty = true; recalc(); flashSave();
+}
+
+async function logout() {
+  clearTimeout(saveTimer);
+  if (saveInFlight && !await saveInFlight) {
+    flash("не удалось сохранить изменения; выход отменён");
+    return;
+  }
+  if (sheetDirty && !await saveToServer()) {
+    flash("не удалось сохранить изменения; выход отменён");
+    return;
+  }
+  try {
+    const response = await fetch(`${API_PREFIX}/auth/logout`, { method: "POST" });
+    if (!response.ok) throw new Error(response.status);
+    location.reload();
+  } catch (error) {
+    flash("не удалось завершить сеанс");
+  }
+}
+
 /* ---------- запуск ---------- */
 async function init() {
   buildChars();
-
-  for (const w of WORLDS) $("#sel-world").appendChild(new Option(w.name, w.id));
-  for (const c of CAREERS) $("#sel-career").appendChild(new Option(c.name, c.id));
-
-  $("#sel-world").addEventListener("change", () => showCareerKit(false));
-  $("#sel-career").addEventListener("change", onCareerChange);
-
+  for (const world of WORLDS) $("#sel-world").appendChild(new Option(world.name, world.id));
+  for (const career of CAREERS) $("#sel-career").appendChild(new Option(career.name, career.id));
+  for (const skill of SKILLS) $("#skill-add-name").appendChild(new Option(skill.name, skill.name));
+  for (const talent of TALENTS) $("#talent-add-name").appendChild(new Option(talent, talent));
   populateBioSelect();
+
+  $("#sel-world").addEventListener("change", () => {
+    showCareerKit(false); sheetDirty = true; flashSave();
+  });
+  $("#sel-career").addEventListener("change", onCareerChange);
   $("#sel-bio").addEventListener("change", onBioChange);
-
-  $("#career-kit").addEventListener("click", e => {
-    const btn = e.target.closest(".kit-toggle");
-    if (!btn) return;
-    careerKitExpanded = !careerKitExpanded;
-    const body = $("#career-kit-body");
-    const arrow = btn.querySelector(".kit-toggle-arrow");
-    if (body) {
-      body.classList.toggle("collapsed", !careerKitExpanded);
-      body.hidden = !careerKitExpanded;
-    }
-    if (arrow) arrow.textContent = careerKitExpanded ? "▾" : "▸";
-    btn.setAttribute("aria-expanded", String(careerKitExpanded));
-  });
-
-  $("#btn-wounds").onclick     = rollWounds;
-  $("#btn-fate").onclick       = rollFate;
-  $("#btn-wealth").onclick     = rollWealth;
-  $("#btn-sanction").onclick   = rollSanction;
-  $("#btn-roll-chars").onclick = rollAllChars;
-  $("#btn-add-skill").onclick  = () => { addSkillRow(); sheetDirty = true; flashSave(); };
-  $("#btn-add-talent").onclick = () => { addTalentRow(); sheetDirty = true; flashSave(); };
-  $("#btn-add-weapon").onclick = () => { addWeaponRow(); sheetDirty = true; flashSave(); };
-  $("#btn-hint").onclick = buildHint;
-
-  $("#btn-export").onclick = exportXML;
-  $("#btn-print").onclick  = () => window.print();
-  $("#btn-import").onclick = () => $("#file-import").click();
-  $("#file-import").addEventListener("change", e => { if (e.target.files[0]) importXML(e.target.files[0]); e.target.value = ""; });
-  $("#btn-reset").onclick = resetSheet;
-  $("#btn-delete-character").onclick = () => deleteCharacter(currentCharId);
-
-  document.addEventListener("input", e => {
-    if (e.target.dataset && e.target.dataset.key) {
-      sheetDirty = true;
-      flashSave();
-      recalc();
-    }
-  });
-
-  $("#char-list").addEventListener("change", async () => {
-    const id = $("#char-list").value;
-    if (!id) return;
-    const oldId = currentCharId;
-    if (!await saveToServer()) {
-      $("#char-list").value = oldId || "";
-      if (!oldId) $("#char-list").selectedIndex = -1;
-      return;
-    }
-    if (!await loadCharacter(id)) {
-      $("#char-list").value = oldId || "";
-      if (!oldId) $("#char-list").selectedIndex = -1;
-    }
-  });
-
-  $("#btn-new-character").onclick = async () => {
+  $("#btn-roll-chars").addEventListener("click", rollAllChars);
+  $("#btn-print").addEventListener("click", () => window.print());
+  $("#btn-hint").addEventListener("click", buildHint);
+  $("#btn-delete-character").addEventListener("click", () => deleteCharacter(currentCharId));
+  $("#btn-logout").addEventListener("click", logout);
+  $("#btn-new-character").addEventListener("click", async () => {
     if (!await saveToServer()) return;
     const data = emptySheetData();
     try {
-      const r = await fetch(`${API_PREFIX}/characters`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+      const response = await fetch(`${API_PREFIX}/characters`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
       });
-      if (!r.ok) throw new Error(r.status);
-      const rec = await r.json();
-      currentCharId = String(rec.id);
+      if (!response.ok) throw new Error(response.status);
+      const record = await response.json();
+      currentCharId = String(record.id);
       try { localStorage.setItem(activeCharStorageKey(), currentCharId); } catch (e) {}
-      sheetDirty = false;
-      apply(data);
-      await loadCharList();
-      $("#char-list").value = currentCharId;
-      sheetDirty = false;
-      syncDeleteButton();
-      flash("новый персонаж создан");
-    } catch (e) {
-      flash("не удалось создать персонажа");
-    }
-  };
+      sheetDirty = false; apply(data); await loadCharList();
+      $("#sheet-switcher").value = currentCharId; syncDeleteButton();
+      flash("новый лист создан");
+    } catch (error) { flash("не удалось создать лист"); }
+  });
+  $("#sheet-switcher").addEventListener("change", async event => {
+    const id = event.currentTarget.value;
+    if (!id) return;
+    const oldId = currentCharId;
+    if (!await saveToServer()) { event.currentTarget.value = oldId || ""; return; }
+    if (!await loadCharacter(id)) event.currentTarget.value = oldId || "";
+  });
+  $("#btn-skill-manage").addEventListener("click", () => setSkillMode("manage"));
+  $("#btn-skill-overview").addEventListener("click", () => setSkillMode("overview"));
+  $("#btn-talent-manage").addEventListener("click", () => setTalentMode(true));
+  $("#btn-talent-overview").addEventListener("click", () => setTalentMode(false));
+  $("#skill-add-form").addEventListener("submit", event => {
+    event.preventDefault();
+    const name = $("#skill-add-name").value;
+    if (!name) { $("#skill-message").textContent = "Сначала выбери навык."; return; }
+    addSkillRow(name, $("#skill-add-level").value);
+    event.currentTarget.reset(); $("#skill-message").textContent = "";
+    sheetDirty = true; recalc(); flashSave();
+  });
+  $("#talent-add-form").addEventListener("submit", event => {
+    event.preventDefault();
+    const name = $("#talent-add-name").value;
+    if (!name) { $("#talent-message").textContent = "Сначала выбери талант."; return; }
+    addTalentRow(name, $("#talent-add-note").value.trim());
+    event.currentTarget.reset(); $("#talent-message").textContent = "";
+    sheetDirty = true; recalc(); flashSave();
+  });
+  $("#btn-gear-manage").addEventListener("click", () => setGearMode(true));
+  $("#btn-gear-overview").addEventListener("click", () => setGearMode(false));
+  $("#gear-add-form").addEventListener("submit", event => {
+    event.preventDefault();
+    const name = $("#gear-new-name").value.trim();
+    if (!name) return;
+    gearItems.push({ name, type: $("#gear-new-type").value.trim(), stats: $("#gear-new-stats").value.trim() });
+    event.currentTarget.reset(); $("#gear-message").textContent = "";
+    sheetDirty = true; renderGear(); flashSave();
+  });
+  $("#btn-xp-save").addEventListener("click", () => {
+    const details = $("#xp-total-input").closest("details"); if (details) details.open = false;
+    sheetDirty = true; recalc(); flashSave();
+  });
+  $("#btn-wealth-save").addEventListener("click", saveWealth);
+  $("#btn-wealth-roll").addEventListener("click", rollWealth);
+  $("#btn-state-edit").addEventListener("click", () => toggleStateEditor());
+  $("#btn-state-cancel").addEventListener("click", () => toggleStateEditor(false));
+  $("#btn-state-save").addEventListener("click", saveState);
+  $("#btn-roll-state").addEventListener("click", rollMaxState);
+  document.addEventListener("click", event => {
+    const button = event.target.closest("[data-state][data-delta]");
+    if (button) adjustState(button.dataset.state, Number(button.dataset.delta));
+  });
+  $("#btn-profile-edit").addEventListener("click", openProfileEdit);
+  $("#btn-profile-cancel").addEventListener("click", cancelProfileEdit);
+  $("#btn-profile-save").addEventListener("click", saveProfile);
+  for (const key of Object.keys(NOTE_BLOCKS)) {
+    $(`[data-note-edit="${key}"]`).addEventListener("click", () => openNoteEditor(key));
+    $(`[data-note-cancel="${key}"]`).addEventListener("click", () => cancelNoteEditor(key));
+    $(`[data-note-save="${key}"]`).addEventListener("click", () => saveNoteEditor(key));
+    $(`[data-note-more="${key}"]`).addEventListener("click", () => toggleNoteExpanded(key));
+  }
 
-  // Загружаем список персонажей
+  document.addEventListener("input", event => {
+    if (!event.target.matches("[data-key]")) return;
+    sheetDirty = true; recalc(); flashSave();
+  });
+
   const initialChars = await loadCharList();
-
   let restored = false;
-
-  // 1) Если в localStorage есть id и запись существует — загружаем её
   let savedId = localStorage.getItem(activeCharStorageKey());
   if (!savedId && !localStorage.getItem(LS_MIGRATED_KEY)) {
     const legacyId = localStorage.getItem(LS_ID_KEY);
-    if (legacyId && $(`#char-list option[value="${CSS.escape(legacyId)}"]`)) {
+    if (legacyId && $(`#sheet-switcher option[value="${CSS.escape(legacyId)}"]`)) {
       savedId = legacyId;
-      try {
-        localStorage.setItem(activeCharStorageKey(), savedId);
-        localStorage.removeItem(LS_ID_KEY);
-      } catch (e) {}
+      try { localStorage.setItem(activeCharStorageKey(), savedId); localStorage.removeItem(LS_ID_KEY); } catch (e) {}
     }
   }
-  if (savedId && $(`#char-list option[value="${CSS.escape(savedId)}"]`)) {
-    await loadCharacter(savedId);
-    restored = true;
+  if (savedId && $(`#sheet-switcher option[value="${CSS.escape(savedId)}"]`)) {
+    restored = await loadCharacter(savedId);
   }
-
-  // 2) Миграция старого локального листа — только для первого аккаунта в этом браузере.
   if (!localStorage.getItem(LS_MIGRATED_KEY) && initialChars && initialChars.length === 0) {
     try {
       const saved = localStorage.getItem(LS_SHEET_KEY);
       if (saved) {
-        const data = JSON.parse(saved);
-        const r = await fetch(`${API_PREFIX}/characters`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data),
+        const data = stripRetiredFields(JSON.parse(saved));
+        const response = await fetch(`${API_PREFIX}/characters`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
         });
-        if (r.ok) {
-          const rec = await r.json();
-          currentCharId = String(rec.id);
+        if (response.ok) {
+          const record = await response.json();
+          currentCharId = String(record.id);
           try { localStorage.setItem(activeCharStorageKey(), currentCharId); } catch (e) {}
-          apply(data);
-          await loadCharList();
-          $("#char-list").value = currentCharId;
-          restored = true;
-          localStorage.setItem(LS_MIGRATED_KEY, "1");
+          apply(data); await loadCharList(); $("#sheet-switcher").value = currentCharId;
+          sheetDirty = data.__gearMigrated !== "1" || data.__statsRaw !== "1";
+          restored = true; localStorage.setItem(LS_MIGRATED_KEY, "1");
           flash("миграция из локального хранилища");
+          if (sheetDirty) flashSave();
         }
       } else localStorage.setItem(LS_MIGRATED_KEY, "1");
-    } catch (e) { /* миграция не удалась — оставляем пустой лист */ }
+    } catch (error) { /* миграция не удалась — лист останется пустым */ }
   } else if (initialChars && initialChars.length > 0) {
     try { localStorage.setItem(LS_MIGRATED_KEY, "1"); } catch (e) {}
   }
-
-  if (!restored) {
-    addSkillRow();
-    addTalentRow();
-    addWeaponRow();
-  }
-
-  // xpTotal — поле со значением по умолчанию тоже попадает в data-key
-  if (!$("input[data-key=xpTotal]").value) $("input[data-key=xpTotal]").value = "400";
-  // если применили сохранённый лист — перезаполнение селекта не должно
-  // затирать восстановленный выбор биографии
+  if (!$('input[data-key="xpTotal"]').value) $('input[data-key="xpTotal"]').value = "400";
   const restoredBio = $("#sel-bio").value;
   populateBioSelect();
   if (restoredBio) $("#sel-bio").value = restoredBio;
   updateBioStatus();
   recalc();
 }
+
 function setAuthMode(mode) {
   const registering = mode === "register";
   $("#login-form").hidden = registering;
   $("#register-form").hidden = !registering;
-  $("#show-login").classList.toggle("accent", !registering);
-  $("#show-register").classList.toggle("accent", registering);
+  $("#show-login").classList.toggle("primary", !registering);
+  $("#show-register").classList.toggle("primary", registering);
   $("#show-login").setAttribute("aria-selected", String(!registering));
   $("#show-register").setAttribute("aria-selected", String(registering));
   $("#auth-message").textContent = "";
@@ -1165,7 +1392,6 @@ function setAuthMode(mode) {
 
 async function openApplication(user) {
   authUser = user;
-  $("#signed-in-user").textContent = `Вошёл: ${user.username}`;
   $("#auth-screen").hidden = true;
   $("#app-shell").hidden = false;
   await init();
@@ -1208,16 +1434,6 @@ async function startApplication() {
     event.preventDefault();
     submitAuth(event.currentTarget, "register");
   });
-  $("#btn-logout").addEventListener("click", async () => {
-    clearTimeout(saveTimer);
-    if (sheetDirty && !await saveToServer()) {
-      flash("не удалось сохранить изменения; выход отменён");
-      return;
-    }
-    await fetch(`${API_PREFIX}/auth/logout`, { method: "POST" });
-    location.reload();
-  });
-
   try {
     const response = await fetch(`${API_PREFIX}/auth/session`);
     if (response.ok) {

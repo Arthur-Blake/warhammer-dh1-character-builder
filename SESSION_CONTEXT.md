@@ -1,6 +1,6 @@
 # SESSION_CONTEXT — переход листа на макет «Досье Инквизиции»
 
-_Сессия: 2026-11-06. Фаза: build (из plan). Статус: план согласован, КОД ЕЩЁ НЕ МЕНЯЛСЯ._
+_Сессия: 2026-11-06. Фаза: build. Статус: перенос начат заново с чистого `HEAD`; после обратной связи выравниваются отклонения от макета._
 
 ## Цель задачи
 
@@ -35,7 +35,7 @@ _Сессия: 2026-11-06. Фаза: build (из plan). Статус: план �
 ## Критичные технические ловушки
 
 - **Потеря данных при удалении полей**: `collect()` (app.js:445) читает только DOM
-  `[data-key]`. Поля, убранные со страницы (player/sex/quirks, arm-h..arm-rl, arm-ag,
+  `[data-key]`. Поля, убранные со страницы (sex/quirks, arm-h..arm-rl, arm-ag,
   history/contacts/notes и пр.), должны либо остаться в скрытом контейнере, либо
   collect() должен мерджить их с последним загруженным снапшотом. То же для
   `emptySheetData()` (app.js:670) — новые ключи не терять.
@@ -61,14 +61,13 @@ _Сессия: 2026-11-06. Фаза: build (из plan). Статус: план �
   `#char-rank`, возраст, `#char-status`, редактор `#profile-editor`
   (openProfileEdit/saveProfile — name/rank/age/status ← существующие data-keys name/rank/age).
 - `#creation` (details.setup): 3 селекта мир/профессия/биография из data.js.
-- `#stats`: 9 стат-плиток (значение+`small`: мир-модификатор), `rollAllCharacteristics()`
-  → rollAllChars (2d10+мод. мира из WORLDS).
+- `#stats`: 9 стат-плиток (значение+бонус+модификатор мира), только общая кнопка броска
+  характеристик → rollAllChars (2d10+мод. мира из WORLDS), без отдельных бросков на плитках.
 - `#skills`: обзор (skill-preview-basic/trained, `#skill-count`) / управление
   (`#skill-rows`, #skill-add-form c `#skill-add-name`/`#skill-add-level`/`#skill-message`)
   поверх существующих addSkillRow/calcSkillRow; уровни: basic/untrained/trained/mastery.
 - `#talents`: `.talent-row` (имя + примечание).
-- `#equipment`: грид-карточки `#gear-preview-list`, `#gear-count`, popover богатства
-  (#wealth-value/#wealth-input/saveWealth → поле wealth; rollWealth сохранить),
+- `#equipment`: грид-карточки `#gear-preview-list`, `#gear-count`, богатство/Троны как в макете,
   управление `#gear-rows` (name/type/stats), #gear-add-form.
 - `#state-row`: степперы adjustState(wounds/fate/fatigue), метры #wounds-meter/#fate-meter,
   `#insanity-value`, `#corruption-value`, `#fatigue-value`, `#xp-available` + popover;
@@ -81,7 +80,7 @@ _Сессия: 2026-11-06. Фаза: build (из plan). Статус: план �
 
 ## Убрать со страницы листа (нет в макете)
 
-Тулбар (export/import/reset/print-кнопка старая), #career-kit, поля player/sex/quirks,
+Тулбар (export/import/reset/print-кнопка старая), #career-kit, поля sex/quirks,
 #movement/#carry/#psy (derived-боксы), #btn-sanction, старые таблицы брони/оружия 9 колонок,
 textarea history/contacts/notes (старый вид), #btn-hint — всё заменить разметкой макета,
 данные сохранить (см. ловушки). Обработчики init() (app.js:998-1154) на removed ID снять.
@@ -101,7 +100,7 @@ textarea history/contacts/notes (старый вид), #btn-hint — всё за
 2. style.css: CSS макета + auth + save-status + print правки.
 3. app.js: перебиндить (см. карту); добавить glue: openProfileEdit/saveProfile,
    setSkillMode/renderSkills (2 режима), setGearMode/renderGear (name/type/stats ↔ модель),
-   adjustState/метры/saveState/rollMaxState, popovers (wealth/xp), renderSheetSwitcher?,
+    adjustState/метры/saveState/rollMaxState, XP popover, renderSheetSwitcher?,
    updateStatusMeters, брифер вместо buildHint-вывода (evaluate — можно оставить
    hcards-логику, вывод в brief-секции).
 4. Проверки: node --check app.js && node --check data.js; py_compile server.py;
@@ -111,8 +110,31 @@ textarea history/contacts/notes (старый вид), #btn-hint — всё за
 
 ## Статус (что сделано в сессии)
 
-- Изучены design-preview.html (тело/JS/CSS, извлечения в /tmp/opencode/mock_*),
-  index.html, app.js (полностью), style.css (полностью), AGENTS.md.
-- @coder-агент не смог запуститься (upstream отказ, пустые assistant-сообщения) —
-  реализацию продолжает основной агент руками.
-- Код проекта НЕ изменён. Git чист (последний коммит 6d475f5).
+- Неудачные незакоммиченные изменения `app.js`, `index.html`, `style.css` отброшены по запросу;
+  ветка `main` и подтянутые коммиты оставлены. Новая реализация начата с чистого `HEAD` `b370379`.
+- `index.html` и `style.css` переведены на структуру и стили `design-preview.html`, без демо-листов
+  и вымышленных записей. Экран авторизации сохранён; старые XML/reset controls удалены из UI.
+- `app.js`: существующие правила `data.js`, авторизация, CRUD, автосохранение и сериализация
+  сохранены; добавлены переключение/создание/удаление листов, редактируемые навыки/таланты,
+  краткая экипировка, блок состояния и сводка по листу.
+- По последней обратной связи убраны отдельные кнопки броска и редактирования с плиток
+  характеристик, оставлен только общий бросок; выбор мира/класса раскрыт сразу. Богатство
+  возвращено в экипировку, опыт остаётся в состоянии листа. Таланты получили отдельный режим
+  управления через «Таланты →», как у навыков; старое снаряжение теперь редактируется в арсенале.
+- Добавлены `status`, `woundsCurrent`, `fatigueCurrent`, `__gearItems`, `__gearMigrated`,
+  `__statsRaw`, `dossier`, `meritNotes`, `fieldNotes`. Для старых листов текущие раны берутся
+  из `wounds`, усталость — 0; старые значения характеристик переводятся в raw-roll, чтобы
+  модификатор мира применялся отдельно. `player`/`history`/`contacts`/`notes` удаляются
+  из загрузки/импорта/следующего сохранения.
+- Заметки «Личное дело», «Журнал заслуг» и «Полевые заметки» редактируются отдельными
+  карандашами, сохраняются в JSON/БД и отображаются с макетным line-clamp и «Подробнее».
+- Для широких шапок зафиксировано вертикальное выравнивание ссылок; раздел происхождения
+  остаётся в трёх колонках, длинное описание биографии ограничено тремя строками, а `apply()`
+  сбрасывает биографию перед загрузкой каждого листа. Удаление очищает ключи кэша, выбирает
+  последний лист или создаёт пустой, если удалён последний.
+- Проверено: `node --check app.js`, `node --check data.js`, `py -m py_compile server.py`,
+  `git diff --check`, GET `/` → 200. Браузерный smoke test прошёл на имитации API CRUD, включая
+  raw-roll миграцию, добавление редактируемых талантов/арсенала и сохранение заметок;
+  консоль показала только ожидаемый 401 для неавторизованного `/api/auth/session`.
+- Ещё не выполнена ручная проверка с реальным аккаунтом/SQLite и полная визуальная
+  сверка на целевых размерах экрана. Текущие изменения незакоммичены.
