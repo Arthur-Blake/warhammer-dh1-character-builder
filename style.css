@@ -82,7 +82,7 @@
 
 .dashboard-grid .stats .stat small{font-size:9px}
 .stat-edit-button{position:absolute;top:42px;right:13px;width:24px;height:24px;padding:0;display:grid;place-items:center;border:1px solid #51432e;border-radius:3px;background:#211d17;color:#d2b16d;font:14px var(--sans);cursor:pointer}.stat-edit-button:hover,.stat-edit-button[aria-pressed="true"]{border-color:var(--gold);background:#302619;color:#f0d596}.stat-edit-button:focus-visible{outline:2px solid #d2b16d;outline-offset:2px}#stats .stat-edit-input{width:64px;max-width:100%;min-width:0;padding:3px 2px;border:1px solid #655230;border-radius:2px;background:#141310;color:#f0d596;font:24px/1 var(--serif);text-align:center}#stats .stat-edit-input:focus-visible{outline:2px solid #d2b16d;outline-offset:1px}#stats .stat.editing{border-color:#655230;background:linear-gradient(145deg,#241f17,#171511)}
-@media print{.stat-edit-button{display:none!important}}
+
 .skill-preview-hint{display:-webkit-box!important;overflow:hidden;color:#938875!important;font-size:9px!important;line-height:1.4;white-space:normal!important;-webkit-box-orient:vertical;-webkit-line-clamp:2}
 .skill-head-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}.skill-head-actions .text-action{white-space:nowrap}
 
@@ -98,7 +98,7 @@
 .character-core{padding:16px;margin-top:14px}.core-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:13px;padding-bottom:9px;border-bottom:1px solid #393229}.core-head h2{margin:0;color:#e6ce97;font:small-caps 15px var(--serif);letter-spacing:1px}.core-head span{color:#897e6c;font-size:9px;text-transform:uppercase;letter-spacing:1px}.character-core .dashboard-grid{margin:0;grid-template-columns:minmax(244px,244px) minmax(0,1fr);grid-template-areas:"stats skills"}.character-core .dashboard-grid>#stats{grid-area:stats}.character-core .dashboard-grid>#skill-section-row{grid-area:skills}.character-core .dashboard-grid.managing{grid-template-columns:1fr;grid-template-areas:"skills"}.character-core .dashboard-grid.managing>#stats{display:none}.character-core .dashboard-grid.managing>#skill-section-row #talents{display:none}.secondary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}.secondary-grid.managing{grid-template-columns:1fr}.secondary-grid.managing #psy-card{display:none}.secondary-grid.managing #equipment{grid-column:1/-1}.character-core .dashboard-grid #stats .stat small{font-size:9px}.hint-card{margin-top:14px;border-color:#59452b;background:linear-gradient(125deg,#201b14,#171512)}.hint-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.hint-head .kicker{display:block;margin-top:4px}.hint-card p{margin:10px 0 0;padding:9px 12px;border-left:2px solid #9a773e;background:#15130f;color:#d2c4a8;font:italic 13px/1.6 var(--serif)}.actions select{max-width:150px;padding:8px 24px 8px 9px;border:1px solid var(--line);border-radius:3px;background:#211e19;color:#e9e0cf;font:11px var(--sans)}.btn.danger{background:#70211f;border-color:#a34138;color:#f3d5cc}.btn.danger:hover{background:#8b2925;border-color:#d15c4d;color:#fff0e9}.psy-card{min-width:0}.gear-card{min-width:0}
 @media(max-width:980px){.actions{gap:6px}.actions select{max-width:130px}.actions .btn{padding:7px 8px;font-size:10px}}
 @media(max-width:680px){.character-core{padding:12px}.core-head{align-items:flex-start;flex-direction:column}.character-core .dashboard-grid{grid-template-columns:1fr;grid-template-areas:"stats" "skills"}.secondary-grid{grid-template-columns:1fr}.actions select{max-width:95px;padding:6px 17px 6px 5px;font-size:9px}.actions .btn{padding:6px;font-size:9px}}
-@media print{.top,.side,.actions,.text-action,.edit-icon,.stat-roll-button,.state-stepper,.profile-edit-btn,.note-more{display:none!important}.layout{display:block;max-width:none;margin:0;padding:0}.character-core,.secondary-grid>.card,.status-card,.note-card,.hint-card{break-inside:avoid;box-shadow:none;background:#fff;color:#111}.hint-card p{color:#111;background:#fff}}
+
 
 .secondary-grid{align-items:start}.psy-card{align-self:start}
 
@@ -154,3 +154,136 @@
 .gear-entry-quantity{width:54px;padding:6px 4px;border:1px solid #51432e;border-radius:2px;background:#171510;color:#d7cdb8;font:11px var(--sans);text-align:center}
 .gear-entry-quantity:focus{outline:1px solid #b99455;outline-offset:1px}
 @media(max-width:480px){.gear-entry-row{grid-template-columns:16px 26px minmax(0,1fr) auto;gap:6px;padding:6px}.gear-entry-icon{width:26px;height:26px}.gear-entry-quantity{width:46px}}
+
+/* Character sheet layout for paper/PDF. Keep this separate from the screen UI. */
+@page{size:A4 portrait;margin:8mm}
+@media print{
+  html,body{width:auto;min-width:0;margin:0!important;background:#fff!important;background-image:none!important;color:#111!important;color-scheme:light!important;font:9pt/1.3 Arial,"Segoe UI",sans-serif!important;-webkit-print-color-adjust:economy;print-color-adjust:economy}
+  #app-shell,#app-shell *{color:#111!important;background:transparent!important;box-shadow:none!important;text-shadow:none!important;box-sizing:border-box!important;outline:none!important}
+  #app-shell{width:100%!important;max-width:100%!important;min-width:0!important;background:#fff!important}
+  .top,.side,.actions,.setup,.text-action,.edit-icon,.stat-roll-button,.stat-edit-button,.state-stepper,.profile-edit-btn,.note-more,.profile-editor,.state-editor,.note-editor,.gear-inventory,.arsenal-browser,.skill-add-form,.table-scroll,.psy-add-form,.xp-edit,.gear-entry-drag,.gear-entry-icon,.gear-entry-controls button,#generated-hint:has(.brief-empty),#app-shell button,#app-shell input:not(.gear-entry-quantity),#app-shell select,#app-shell textarea,#app-shell form{display:none!important}
+  .layout{display:block!important;width:auto!important;max-width:100%!important;min-width:0!important;margin:0!important;padding:0!important}
+  .layout>.main{display:block!important;width:auto!important;max-width:100%!important;min-width:0!important;margin:0!important;padding:0!important}
+  .eyebrow{margin:0 0 1mm;padding:0;border:0;color:#555!important;font-size:7pt;letter-spacing:.6pt}
+  #overview{width:100%!important;max-width:100%!important;margin:0 0 3mm!important;padding:3mm!important;border:1px solid #555;border-radius:0;background:#fff!important;break-inside:avoid}
+  #overview:after{display:none!important}
+  #overview .identity{align-items:center;gap:3mm}
+  #overview .rank{width:11mm;height:11mm;border:1px solid #555;background:#fff!important;color:#111!important;box-shadow:none!important}
+  #overview h1{margin:0;color:#111!important;font: bold 20pt/1.1 Georgia,"Times New Roman",serif}
+  #overview .meta{display:flex;flex-wrap:wrap;gap:2mm 4mm;margin-top:1mm;color:#333!important}
+  #overview .badge{border:1px solid #777;background:#fff!important;color:#111!important}
+  #overview .details{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2mm;margin:3mm 0 0;padding-top:2mm;border-top:1px solid #aaa}
+  #overview .detail{color:#555!important;font-size:7pt}
+  #overview .detail b{display:block;color:#111!important;font-size:9pt}
+  #state-row{display:block!important;width:100%!important;max-width:100%!important;min-width:0!important;margin:0 0 3mm!important}
+  .status-card,.character-core,.secondary-grid,.note-card,.hint-card{width:100%!important;max-width:100%!important;min-width:0!important;margin:0 0 3mm!important;padding:3mm!important;border:1px solid #777!important;border-radius:0!important;background:#fff!important;color:#111!important;break-inside:auto!important}
+  #overview,.status-card,#stats,.skills-card,.talent-card{break-inside:avoid-page!important}
+  .status-card .card-head{margin:0 0 2mm;padding:0 0 1.5mm;border-bottom:1px solid #aaa}
+  .status-card .card-head h2,.core-head h2,.field-kit-head h2,.note-head h2,.hint-head h2{color:#111!important;font-size:11pt}
+  .status-card .metrics{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:2mm}
+  .status-card .metric-pair{display:contents!important}
+  .status-card .metric{min-width:0;padding:2mm;border:1px solid #bbb;background:#fff!important;break-inside:avoid}
+  .status-card .metric label,.status-card .metric small{color:#555!important;font-size:7pt}
+  .status-card .metric strong,.status-card .counter-value strong,.status-card .counter-meter>strong{color:#111!important;font:bold 12pt/1.2 Arial,sans-serif}
+  .status-card .meter{height:1.5mm;border:1px solid #aaa;background:#fff!important}
+  .status-card .meter i{background:#777!important}
+  .character-core{padding:3mm!important}
+  .core-head{margin:0 0 2mm;padding:0 0 1.5mm;border-bottom:1px solid #777}
+  .core-head span,.kicker{color:#555!important}
+  .dashboard-grid,.character-core .dashboard-grid,.character-core .dashboard-grid.managing{display:block!important;width:100%!important;max-width:100%!important;margin:0!important}
+  .dashboard-grid>#stats,.character-core .dashboard-grid>#stats{display:block!important;grid-area:stats!important;min-width:0!important}
+  #character-core .dashboard-grid.managing>#stats{display:block!important}
+  .dashboard-grid>#skill-section-row,.character-core .dashboard-grid>#skill-section-row{display:block!important;width:100%!important;max-width:100%!important;min-width:0!important;margin-top:3mm!important}
+  #stats,.skills-card,.talent-card{min-width:0!important;margin:0!important;padding:2.5mm!important;border:1px solid #aaa!important;border-radius:0!important;background:#fff!important;break-inside:auto!important}
+  #stats .card-head{margin:0 0 2mm;padding:0 0 1mm;border-bottom:1px solid #aaa}
+  #stats .card-head h2,#skills h2,#talents h2{color:#111!important;font-size:10pt}
+  #stats .kicker{display:none!important}
+  #stats .stat-roll-formula{margin:0;color:#555!important;font-size:7pt}
+  #stats .stats{display:grid!important;grid-template-columns:repeat(9,minmax(0,1fr))!important;justify-content:stretch!important;align-items:stretch!important;gap:1mm!important}
+  #stats .stats .stat{display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;grid-template-rows:auto auto!important;align-items:baseline!important;justify-items:stretch!important;gap:0 1mm!important;width:auto!important;max-width:none!important;min-width:0!important;min-height:0!important;aspect-ratio:auto!important;margin:0!important;padding:1.4mm!important;border:1px solid #bbb!important;background:#fff!important;text-align:left!important;break-inside:avoid}
+  #stats .stats .stat:last-child{grid-column:auto!important;justify-self:stretch!important}
+  #stats .stats .stat label{grid-column:1/-1!important;align-self:auto!important;justify-self:start!important;max-width:none!important;color:#333!important;font:7pt/1.1 Arial,sans-serif!important}
+  #stats .stats .stat strong,#stats [id^="val_"]{display:block!important;grid-column:2!important;grid-row:2!important;color:#111!important;font:bold 12pt/1 Georgia,"Times New Roman",serif!important;text-align:right!important}
+  #stats .stats .stat small{display:block!important;grid-column:1!important;grid-row:2!important;align-self:center!important;max-width:none!important;overflow:visible!important;color:#555!important;font:6.3pt/1.15 Arial,sans-serif!important;text-align:left!important;white-space:normal!important;overflow-wrap:anywhere}
+  #stats [id^="roll_"],#stats [id^="stat-separator_"]{display:inline!important;color:#555!important}
+  #stats .stats .stat small{display:none!important}
+  #stats .stat-edit-input{display:none!important}
+  #skill-overview,#talent-overview,#gear-overview{display:block!important;animation:none!important}
+  #skill-management,#talent-management,#gear-management{display:none!important}
+  #skill-section-row #skills,#skill-section-row #talents{display:block!important;width:100%!important;max-width:100%!important;min-width:0!important;margin:0 0 2mm!important;break-inside:avoid-page!important}
+  #character-core .dashboard-grid.managing>#skill-section-row #skills,#character-core .dashboard-grid.managing>#skill-section-row #talents{display:block!important}
+  .skill-card-head{margin:0 0 1.5mm;padding:0 0 1mm;border-bottom:1px solid #aaa}
+  .skill-head-actions{display:none!important}
+  .skill-subsections{display:block!important}
+  .skill-subsection h3{margin:0 0 1mm;padding:0 0 .7mm;border-color:#aaa;color:#333!important;font-size:8pt}
+  .skill-preview-list{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;align-items:start!important;gap:1mm!important;width:100%!important;max-width:100%!important}
+  .talent-list{display:block!important;width:100%!important;max-width:100%!important}
+  .skill-preview,.talent-row{display:grid!important;grid-template-columns:minmax(0,1fr) auto auto!important;gap:1mm!important;min-width:0!important;max-width:100%!important;margin:0 0 1mm!important;padding:1mm 1.3mm!important;border:1px solid #ccc!important;background:#fff!important;break-inside:avoid-page!important}
+  .skill-preview-meta{gap:0!important}
+  .skill-preview-meta span,.talent-row span{overflow:visible!important;color:#111!important;font-size:7.5pt!important;white-space:normal!important;overflow-wrap:anywhere}
+  .skill-preview-meta small{color:#555!important;font-size:6.5pt!important;white-space:normal!important}
+  .skill-preview-hint{display:none!important}
+  .skill-characteristic{color:#555!important;font-size:8pt!important}
+  .skill-preview strong{color:#111!important;font:bold 10pt Georgia,"Times New Roman",serif!important}
+  .talent-row{grid-template-columns:1fr!important;gap:0!important}
+  .talent-row small{color:#555!important;font-size:6.5pt!important}
+  .skill-empty{margin:0;color:#555!important;font-size:7pt!important}
+  #secondary-grid{display:block!important;padding:3mm!important}
+  .field-kit-head{margin:0 0 2mm;padding:0 0 1mm;border-bottom:1px solid #777}
+  .field-kit-head span{color:#555!important}
+  .secondary-left{display:block!important;width:100%!important;max-width:100%!important;min-width:0!important}
+  #secondary-grid.managing .secondary-left{display:grid!important}
+  #psy-card,.field-notes-card,#equipment{display:block!important;grid-column:auto!important;min-width:0!important;margin:0!important;padding:2.5mm!important;border:1px solid #aaa!important;border-radius:0!important;background:#fff!important;break-inside:auto!important}
+  #secondary-grid.managing #psy-card{display:block!important}
+  #secondary-grid.managing .field-kit-columns>#equipment{grid-column:auto!important}
+  #psy-card>summary{padding:0 0 1mm!important;border-bottom:1px solid #bbb}
+  #psy-card>summary h2{margin:0;color:#111!important;font-size:9pt}
+  #psy-card>summary small{color:#555!important;font-size:6.5pt}
+  .psy-chevron{display:none!important}
+  #psy-card>.psy-content{display:block!important;height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important;padding:1.5mm 0 0!important;background:#fff!important}
+  .psy-power-list{display:block!important;max-height:none!important;overflow:visible!important}
+  .psy-power-row{padding:1mm!important;margin-bottom:1mm!important;border-color:#ccc!important;background:#fff!important;color:#111!important;break-inside:avoid-page!important}
+  .psy-power-row button,.psy-add-form,.psy-mutations p{display:none!important}
+  .psy-mutations{padding:1mm 0!important;border-color:#bbb}
+  .psy-empty{color:#555!important}
+  .field-notes-head{margin-bottom:1mm}
+  .field-notes-head h2{color:#111!important;font-size:9pt}
+  .field-notes-mark{color:#555!important}
+  .gear-card .skill-card-head{margin-bottom:1mm}
+  .gear-card .skill-card-head h2{color:#111!important;font-size:9pt}
+  .field-kit-columns{display:block!important;width:100%!important;min-width:0!important;max-width:100%!important}
+  .secondary-left,#equipment,#gear-overview,#gear-preview-list,.bottom,.note-card{min-width:0!important;max-width:100%!important}
+  #equipment,#gear-overview,#gear-preview-list{display:block!important;width:100%!important}
+  #gear-preview-list.gear{display:block!important}
+  .gear-entry-row{display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;align-items:start!important;gap:1mm!important;min-width:0!important;max-width:100%!important;margin-bottom:1mm!important;padding:1.2mm!important;border:1px solid #ccc!important;background:#fff!important;break-inside:avoid-page!important}
+  .gear-entry-info{display:grid!important;gap:.5mm!important;min-width:0!important}
+  .gear-entry-info b{color:#111!important;font-size:7.5pt!important}
+  .gear-entry-info small,.gear-entry-info span{color:#555!important;font-size:6.5pt!important;white-space:normal!important;overflow:visible!important;overflow-wrap:anywhere!important}
+  .gear-entry-controls{display:flex!important;align-items:center!important;gap:1mm!important}
+  .gear-entry-quantity{display:block!important;width:10mm!important;min-width:0!important;padding:0!important;border:0!important;background:transparent!important;color:#111!important;font:bold 8pt Arial,sans-serif!important;text-align:center!important;appearance:textfield}
+  .wealth-line{margin-top:2mm!important;padding-top:1.5mm!important;border-color:#aaa!important}
+  .wealth-line>div:first-child strong,.wealth-edit>strong{color:#111!important}
+  .wealth-line small{color:#555!important}
+  .bottom{display:block!important;width:100%!important;max-width:100%!important;min-width:0!important}
+  .bottom>.note-card{break-inside:avoid-page!important}
+  .note-card{padding:2.5mm!important}
+  .note-head{margin-bottom:1mm}
+  .note-head h2{color:#111!important;font-size:9pt}
+  .note,.note-clamp,.note-clamp.expanded{display:block!important;max-height:none!important;min-height:0!important;overflow:visible!important;-webkit-line-clamp:unset!important;-webkit-box-orient:initial!important;color:#222!important;font:8pt/1.35 Georgia,"Times New Roman",serif!important;white-space:pre-wrap!important;overflow-wrap:anywhere!important}
+  #generated-hint{margin:0 0 3mm!important;padding:2.5mm!important;border:1px solid #aaa!important;background:#fff!important}
+  #generated-hint .hint-head{margin:0}
+  #generated-hint .hint-head h2{color:#111!important;font-size:9pt}
+  #generated-hint .hint-head .kicker{color:#555!important}
+  #generated-hint .brief-grid{gap:1.5mm;margin-top:1.5mm}
+  #generated-hint .brief-section{padding:1.5mm;border-color:#bbb;background:#fff!important;break-inside:avoid}
+  #generated-hint .brief-section h3{padding-bottom:.5mm;border-color:#aaa;color:#333!important;font-size:7.5pt}
+  #generated-hint .brief-section p,#generated-hint .brief-section ul{color:#333!important;font-size:7pt}
+  #generated-hint .brief-empty{display:none!important}
+  .footer{margin:0;padding:1mm 0 0;border-top:1px solid #aaa;color:#555!important;font-size:6.5pt;text-align:right}
+  .character-core,.secondary-grid,.bottom,.hint-card{break-inside:auto!important}
+  #app-shell,.layout,.layout>.main,.character-core,.dashboard-grid,#skill-section-row,.secondary-grid,.field-kit-columns,.bottom{min-width:0!important;max-width:100%!important}
+  #app-shell *{overflow-wrap:anywhere}
+  h1,h2,h3,.skill-subsection h3{break-after:avoid-page}
+  #stats .stat label{font:6.2pt/1.1 Arial,sans-serif!important;white-space:nowrap!important;overflow-wrap:normal!important;word-break:keep-all!important}
+  .stat,.metric,.skill-preview,.talent-row,.gear-entry-row,.note-card,.brief-section{orphans:3;widows:3}
+}
