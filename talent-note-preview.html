@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Превью примечаний к талантам</title>
+  <style>
+    :root{color-scheme:dark;--bg:#141310;--panel:#1b1915;--field:#171510;--line:#393229;--line-strong:#51432e;--text:#d7cdb8;--muted:#938875;--gold:#efd596;--accent:#d2b16d;--serif:Georgia,"Times New Roman",serif;--sans:Arial,"Segoe UI",sans-serif}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% -15%,#33291b 0,transparent 52%),var(--bg);color:var(--text);font:14px var(--sans);min-height:100vh;padding:42px 22px}
+    main{max-width:1080px;margin:auto}.eyebrow{color:#9c8354;font-size:10px;letter-spacing:1.5px;text-transform:uppercase}.heading{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin:10px 0 22px}.heading h1{margin:0;color:#e6ce97;font:small-caps 28px var(--serif);letter-spacing:.7px}.heading p{margin:6px 0 0;color:var(--muted);font-size:12px}.preview-label{padding:7px 10px;border:1px solid #655230;color:var(--gold);font-size:10px;letter-spacing:.7px;text-transform:uppercase;white-space:nowrap}
+    .card{padding:18px;background:linear-gradient(145deg,#211c14,#171512);border:1px solid #51432e;box-shadow:0 14px 40px #0005}.card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;padding-bottom:13px;border-bottom:1px solid var(--line)}.card-head h2{margin:0;color:#e0cfaa;font:small-caps 16px var(--serif);letter-spacing:.6px}.kicker{display:block;margin-top:5px;color:var(--muted);font-size:10px}.action{border:0;background:none;color:var(--accent);font:12px var(--sans)}
+    .table-scroll{overflow-x:auto}.talent-table{width:100%;min-width:760px;table-layout:fixed;border-collapse:collapse;text-align:left}.talent-table th{padding:9px 8px;border-bottom:1px solid #453b2f;color:#948977;font-size:9px;font-weight:500;letter-spacing:.8px;text-transform:uppercase}.talent-table th:nth-child(1){width:36%}.talent-table th:nth-child(2){width:58%}.talent-table th:nth-child(3){width:6%}.talent-table td{padding:9px 8px;border-bottom:1px solid #302a22;color:var(--text);font-size:11px;vertical-align:middle}.talent-table select,.talent-table input{display:block;width:100%;min-width:0;max-width:100%;padding:8px;border:1px solid var(--line-strong);border-radius:2px;background:var(--field);color:var(--text);font:11px var(--sans)}.talent-table select{color:#e9e0cf}.talent-table input{overflow:hidden;text-overflow:clip}.talent-table input:focus{outline:1px solid #b99455;outline-offset:1px}.delete{border:0;background:none;color:#a36c61;font-size:18px}
+    .footnote{display:flex;align-items:flex-start;gap:10px;margin:15px 2px 0;color:#a99b83;font-size:11px;line-height:1.6}.footnote b{color:var(--gold);font-weight:500}.bulb{color:var(--accent);font-size:14px}
+    @media(max-width:650px){body{padding:24px 12px}.heading{align-items:flex-start;flex-direction:column}.heading h1{font-size:23px}.card{padding:13px}.preview-label{align-self:flex-start}}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">Лист персонажа · таланты</div>
+    <div class="heading">
+      <div><h1>Примечания с кратким пересказом</h1><p>Вариант таблицы, где описание таланта автоматически подставляется в поле «Примечание».</p></div>
+      <div class="preview-label">Визуальное превью</div>
+    </div>
+    <section class="card" aria-label="Пример таблицы талантов">
+      <div class="card-head">
+        <div><h2>Все таланты</h2><span class="kicker">Начальные и биографические</span></div>
+        <button class="action" type="button">← Свернуть</button>
+      </div>
+      <div class="table-scroll">
+        <table class="talent-table">
+          <thead><tr><th>Талант</th><th>Примечание</th><th></th></tr></thead>
+          <tbody>
+            <tr><td><select aria-label="Талант"><option>Амбидекстрия</option></select></td><td><input aria-label="Примечание: Амбидекстрия" value="Лов 30. Нет штрафа −20 за действие неосновной рукой; с талантом Две Руки штраф за двойную атаку падает до −10."></td><td><button class="delete" aria-label="Удалить талант">×</button></td></tr>
+            <tr><td><select aria-label="Талант"><option>Контратака</option></select></td><td><input aria-label="Примечание: Контратака" value="ББ 40. После успешного Парирования проводишь немедленную свободную атаку с штрафом −20."></td><td><button class="delete" aria-label="Удалить талант">×</button></td></tr>
+            <tr><td><select aria-label="Талант"><option>Основное Оружие (Лаз)</option></select></td><td><input aria-label="Примечание: Основное Оружие" value="Группа талантов (Болт, Огонь, Лаз, Пусковое, Мельта, Плазма, Примитив, Стаб). Обращаешься с выбранным основным оружием без штрафа."></td><td><button class="delete" aria-label="Удалить талант">×</button></td></tr>
+            <tr><td><select aria-label="Талант"><option>Паранойя</option></select></td><td><input aria-label="Примечание: Паранойя" value="Получаешь +2 к Инициативе; Мастер может тайно проверять твоё Восприятие на скрытые опасности. Окружающие могут относиться к тебе хуже."></td><td><button class="delete" aria-label="Удалить талант">×</button></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <p class="footnote"><span class="bulb">✦</span><span><b>Важный нюанс:</b> сейчас примечание — однострочное поле ввода. Длинный пересказ будет подставлен целиком, но в строке видна только его часть; чтобы читать всё описание, поле нужно расширить или показывать полный текст отдельно.</span></p>
+  </main>
+</body>
+</html>

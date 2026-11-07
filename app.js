@@ -22,6 +22,9 @@ let isApplying = false;                     // guard: не сохранять в
 let sheetDirty = false;                     // пользователь менял лист
 let suppressAutosave = false;               // переход/удаление персонажа
 let gearItems = [];
+let arsenalCart = new Map();
+let arsenalPage = 1;
+const ARSENAL_PAGE_SIZE = 20;
 let profileEditorSnapshot = null;
 let stateEditorSnapshot = null;
 
@@ -218,7 +221,7 @@ function calcSkillRow(tr) {
 }
 
 /* ---------- таланты ---------- */
-function addTalentRow(name = "", note = "", src = "manual") {
+function addTalentRow(name = "", note, src = "manual") {
   const tb = $("#talents-tbody");
   const tr = document.createElement("tr");
   if (src === "bio") tr.dataset.src = "bio";
@@ -243,26 +246,29 @@ function addTalentRow(name = "", note = "", src = "manual") {
   noteEl.className = "talent-note";
   noteEl.placeholder = "примечание / подтип";
   const nameCell = document.createElement("td"); nameCell.appendChild(sel);
-  const sourceCell = document.createElement("td"); sourceCell.className = "talent-source";
-  sourceCell.textContent = src === "bio" ? "Предыстория" : "Вручную";
   const noteCell = document.createElement("td"); noteCell.appendChild(noteEl);
   const deleteCell = document.createElement("td");
   const del = document.createElement("button"); del.type = "button"; del.className = "skill-delete"; del.textContent = "×";
   del.setAttribute("aria-label", "Удалить талант");
   del.onclick = () => { tr.remove(); sheetDirty = true; flashSave(); recalc(); };
   deleteCell.appendChild(del);
-  tr.append(nameCell, sourceCell, noteCell, deleteCell);
+  tr.append(nameCell, noteCell, deleteCell);
   tb.appendChild(tr);
 
   if (name) sel.value = name;
   else sel.selectedIndex = 0;   // гарантируем «пусто» даже после истории опций
-  noteEl.value = note;
+  const summary = findTalentText(name);
+  noteEl.value = note === undefined ? summary : note;
+  let generatedNote = noteEl.value === summary ? summary : "";
   sel.onchange = () => {
-    if (src !== "bio") sourceCell.textContent = noteEl.value.trim() || "Вручную";
+    if (!noteEl.value.trim() || (generatedNote && noteEl.value === generatedNote)) {
+      noteEl.value = findTalentText(sel.value);
+      generatedNote = noteEl.value;
+    }
     sheetDirty = true; flashSave(); recalc();
   };
   noteEl.oninput = () => {
-    if (src !== "bio") sourceCell.textContent = noteEl.value.trim() || "Вручную";
+    if (noteEl.value !== generatedNote) generatedNote = "";
     sheetDirty = true; flashSave();
   };
 }
@@ -410,6 +416,7 @@ function collect() {
 
 function apply(data) {
   data = stripRetiredFields(data || {});
+  arsenalCart.clear();
   if (data.__statsRaw !== "1") {
     const storedWorld = WORLDS.find(world => world.id === data.world);
     for (const c of CHARS) {
@@ -436,7 +443,10 @@ function apply(data) {
     }
     for (const parts of unpack(data.__talents)) {
       const [name, note, src] = parts;
-      if (name || note) addTalentRow(name, note || "", src === "bio" ? "bio" : "manual");
+      if (name || note) {
+        const source = src === "bio" ? "bio" : "manual";
+        addTalentRow(name, source === "bio" && !note ? findTalentText(name) : (note || ""), source);
+      }
     }
     for (const fields of unpack(data.__weapons)) if (fields.some(Boolean)) addWeaponRow({ name: fields[0], cls: fields[1], dmg: fields[2], dtyp: fields[3], pen: fields[4], rng: fields[5], clip: fields[6], rld: fields[7], spec: fields[8] });
 
@@ -889,7 +899,7 @@ function addBioRows(id, skipExisting = false) {
   }
   for (const s of (bio.skills || [])) if (!skipExisting || !existing.has(s)) addSkillRow(s, "untrained", "bio");
   for (const s of (bio.skillBasic || [])) if (!skipExisting || !existing.has(s)) addSkillRow(s, "basic", "bio");
-  for (const t of (bio.talents || [])) if (!skipExisting || !existing.has(t)) addTalentRow(t, "", "bio");
+  for (const t of (bio.talents || [])) if (!skipExisting || !existing.has(t)) addTalentRow(t, findTalentText(t), "bio");
 }
 
 function onCareerChange() {
@@ -968,7 +978,7 @@ function setTalentMode(managing) {
   $("#skill-section-row").classList.toggle("talent-managing", managing);
   $("#dashboard-grid").classList.toggle("managing", managing);
   $("#dashboard-grid").classList.toggle("talent-managing", managing);
-  if (managing) renderTalentPreview();
+  renderTalentPreview();
 }
 
 function renderSkillPreview() {
@@ -1008,9 +1018,10 @@ function renderTalentPreview() {
     if (!name) continue;
     const item = document.createElement("div"); item.className = "talent-row";
     const title = document.createElement("span"); title.textContent = name;
-    const source = document.createElement("small");
-    source.textContent = tr.dataset.src === "bio" ? "Предыстория" : (tr.querySelector(".talent-note").value.trim() || "Вручную");
-    item.append(title, source); root.appendChild(item);
+    const note = tr.querySelector(".talent-note").value.trim();
+    item.appendChild(title);
+    if (note) { const summary = document.createElement("small"); summary.textContent = note; item.appendChild(summary); }
+    root.appendChild(item);
   }
   if (!root.children.length) root.innerHTML = '<p class="skill-empty">Таланты не добавлены.</p>';
 }
@@ -1113,37 +1124,195 @@ function readLegacyGearItems() {
   return items;
 }
 
+function getFilteredArmoryItems() {
+  const query = $("#arsenal-search").value.trim().toLocaleLowerCase("ru");
+  const category = $(".arsenal-category.active").dataset.arsenalCategory;
+  const market = $("#arsenal-market").value;
+  const kind = $("#arsenal-kind").value;
+  const availability = $("#arsenal-availability").value;
+  const fromInput = $("#arsenal-price-from").value;
+  const toInput = $("#arsenal-price-to").value;
+  const hasPriceRange = fromInput !== "" || toInput !== "";
+  const from = fromInput === "" ? 0 : Number(fromInput);
+  const to = toInput === "" ? Infinity : Number(toInput);
+  const results = ARMORY_CATALOG.filter(item => {
+    const text = `${item.name} ${item.type} ${item.stats} ${item.availability}`.toLocaleLowerCase("ru");
+    const marketMatch = market === "all" || item.market === "general" || item.market === market;
+    return (!query || text.includes(query)) &&
+      (category === "all" || item.category === category) &&
+      marketMatch &&
+      (kind === "all" || item.kind === kind) &&
+      (availability === "all" || item.availability === availability) &&
+      (!hasPriceRange || (item.price != null && Number(item.price) >= from && Number(item.price) <= to));
+  });
+  const sort = $("#arsenal-sort").value;
+  if (sort === "price-asc") results.sort((a, b) => a.price == null ? 1 : b.price == null ? -1 : a.price - b.price);
+  else if (sort === "price-desc") results.sort((a, b) => a.price == null ? 1 : b.price == null ? -1 : b.price - a.price);
+  else if (sort === "name") results.sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  return results;
+}
+
+function renderArsenalSuggestions() {
+  const root = $("#arsenal-suggestions"), query = $("#arsenal-search").value.trim().toLocaleLowerCase("ru");
+  root.replaceChildren();
+  if (!query || document.activeElement !== $("#arsenal-search")) { root.hidden = true; return; }
+  const matches = ARMORY_CATALOG.filter(item => `${item.name} ${item.type}`.toLocaleLowerCase("ru").includes(query)).slice(0, 5);
+  for (const item of matches) {
+    const button = document.createElement("button"); button.type = "button"; button.textContent = item.name;
+    button.addEventListener("click", () => { $("#arsenal-search").value = item.name; arsenalPage = 1; root.hidden = true; renderArsenalCatalog(); });
+    root.appendChild(button);
+  }
+  root.hidden = !matches.length;
+}
+
+function formatArmoryStats(stats) {
+  return String(stats || "")
+    .replace(/(^|[·\s])Дист:/g, "$1Дальность:")
+    .replace(/(^|[·\s])РоФ:/g, "$1Скорострельность:")
+    .replace(/(^|[·\s])Бро:/g, "$1Бронебойность:")
+    .replace(/(^|[·\s])Об:/g, "$1Обойма:")
+    .replace(/(^|[·\s])Пер:/g, "$1Перезарядка:");
+}
+
+function renderArsenalCatalog() {
+  const root = $("#arsenal-results"), results = getFilteredArmoryItems();
+  const pageCount = Math.ceil(results.length / ARSENAL_PAGE_SIZE);
+  arsenalPage = Math.max(1, Math.min(arsenalPage, pageCount || 1));
+  const first = results.length ? (arsenalPage - 1) * ARSENAL_PAGE_SIZE : 0;
+  const visible = results.slice(first, first + ARSENAL_PAGE_SIZE);
+  root.replaceChildren();
+  $("#arsenal-result-count").textContent = `${results.length} ${results.length === 1 ? "предмет" : results.length > 1 && results.length < 5 ? "предмета" : "предметов"}`;
+  $("#arsenal-page-range").textContent = results.length ? `${first + 1}–${Math.min(first + ARSENAL_PAGE_SIZE, results.length)} из ${results.length}` : "0 из 0";
+  $("#arsenal-empty").hidden = results.length > 0;
+  const marketNames = {general:"Общий рынок",feral:"Дикие / феодальные",hive:"Миры-ульи",forge:"Миры-кузницы",frontier:"Миры-фронтиры",void:"Пустота",warzone:"Зона боевых действий",ordos:"Святые Ордосы"};
+  for (const item of visible) {
+    const card = document.createElement("article"); card.className = "arsenal-item";
+    const icon = document.createElement("div"); icon.className = "arsenal-item-icon"; icon.textContent = item.category === "armor" ? "⛨" : item.category === "weapon" ? "⚔" : item.category === "service" ? "⌂" : item.category === "ammo" ? "▣" : "✦";
+    const main = document.createElement("div"); main.className = "arsenal-item-main";
+    const title = document.createElement("div"); title.className = "arsenal-item-title";
+    const name = document.createElement("b"); name.textContent = item.name;
+    const type = document.createElement("small"); type.textContent = item.type;
+    title.append(name, type);
+    const stats = document.createElement("div"); stats.className = "arsenal-item-stats"; stats.textContent = [formatArmoryStats(item.stats), item.weight && `Вес ${item.weight}`].filter(Boolean).join(" · ");
+    const badges = document.createElement("div"); badges.className = "arsenal-item-badges";
+    const marketBadge = document.createElement("span"); marketBadge.textContent = marketNames[item.market] || item.market; badges.appendChild(marketBadge);
+    const rarityBadge = document.createElement("span"); rarityBadge.textContent = item.availability; badges.appendChild(rarityBadge);
+    const sourceBadge = document.createElement("span"); sourceBadge.textContent = `стр. ${item.sourcePage}`; badges.appendChild(sourceBadge);
+    main.append(title, stats, badges);
+    const end = document.createElement("div"); end.className = "arsenal-item-end";
+    const price = document.createElement("strong"); price.textContent = item.price == null ? (item.priceLabel || "Цена не указана") : `${Number(item.price).toLocaleString("ru-RU")} Тр.`;
+    if (item.price != null && item.unit) price.textContent += ` · ${item.unit}`;
+    const add = document.createElement("button"); add.type = "button"; add.className = "arsenal-add";
+    const inCart = arsenalCart.get(item.id); add.textContent = inCart ? `✓ В корзине ×${inCart.qty}` : "＋ В корзину";
+    if (inCart) add.classList.add("in-cart");
+    add.addEventListener("click", () => addArsenalItem(item));
+    end.append(price, add); card.append(icon, main, end); root.appendChild(card);
+  }
+  renderArsenalPagination(results.length, pageCount);
+}
+
+function renderArsenalPagination(total, pageCount = Math.ceil(total / ARSENAL_PAGE_SIZE)) {
+  const root = $("#arsenal-pagination"); root.replaceChildren();
+  root.hidden = pageCount <= 1;
+  if (pageCount <= 1) return;
+  const goTo = page => { arsenalPage = page; renderArsenalCatalog(); $("#arsenal-results").scrollIntoView({behavior:"smooth",block:"start"}); };
+  const button = (label, page, active = false, disabled = false) => {
+    const el = document.createElement("button"); el.type = "button"; el.className = "arsenal-page";
+    el.textContent = label; el.disabled = disabled;
+    if (page) el.dataset.page = String(page);
+    if (active) { el.classList.add("active"); el.setAttribute("aria-current", "page"); }
+    if (!disabled && page) el.addEventListener("click", () => goTo(page));
+    root.appendChild(el);
+  };
+  button("‹", arsenalPage - 1, false, arsenalPage === 1);
+  const numbers = pageCount <= 7 ? Array.from({length: pageCount}, (_, i) => i + 1) : [1, ...(arsenalPage > 3 ? ["…"] : []), ...Array.from({length: Math.min(pageCount - 1, arsenalPage + 1) - Math.max(2, arsenalPage - 1) + 1}, (_, i) => Math.max(2, arsenalPage - 1) + i), ...(arsenalPage < pageCount - 2 ? ["…"] : []), pageCount];
+  for (const page of numbers) page === "…" ? (() => { const el = document.createElement("span"); el.className = "arsenal-page-ellipsis"; el.textContent = page; root.appendChild(el); })() : button(String(page), page, page === arsenalPage);
+  button("›", arsenalPage + 1, false, arsenalPage === pageCount);
+}
+
+function addArsenalItem(item) {
+  const current = arsenalCart.get(item.id);
+  if (current) current.qty++;
+  else arsenalCart.set(item.id, { item, qty: 1 });
+  renderArsenalCart(); renderArsenalCatalog();
+}
+
+function renderArsenalCart() {
+  const root = $("#arsenal-cart-items"); root.replaceChildren();
+  let count = 0, total = 0, unpriced = 0;
+  if (!arsenalCart.size) {
+    const empty = document.createElement("p"); empty.className = "arsenal-cart-empty"; empty.textContent = "Добавь предмет кнопкой «В корзину»."; root.appendChild(empty);
+  }
+  for (const [id, entry] of arsenalCart) {
+    const {item, qty} = entry; count += qty;
+    if (item.price == null) unpriced += qty; else total += item.price * qty;
+    const row = document.createElement("div"); row.className = "arsenal-cart-row";
+    const info = document.createElement("div"), name = document.createElement("b"), meta = document.createElement("small");
+    name.textContent = item.name; meta.textContent = `${item.price == null ? item.priceLabel || "Цена не указана" : `${item.price} Тр.`} · ${item.availability}`; info.append(name, meta);
+    const controls = document.createElement("div"); controls.className = "arsenal-cart-qty";
+    const changeQty = delta => { const next = arsenalCart.get(id); next.qty += delta; if (next.qty <= 0) arsenalCart.delete(id); renderArsenalCart(); renderArsenalCatalog(); };
+    const minus = document.createElement("button"); minus.type = "button"; minus.textContent = "−"; minus.setAttribute("aria-label", `Уменьшить количество: ${item.name}`); minus.addEventListener("click", () => changeQty(-1));
+    const amount = document.createElement("span"); amount.textContent = `×${qty}`;
+    const plus = document.createElement("button"); plus.type = "button"; plus.textContent = "+"; plus.setAttribute("aria-label", `Увеличить количество: ${item.name}`); plus.addEventListener("click", () => changeQty(1));
+    controls.append(minus, amount, plus); row.append(info, controls); root.appendChild(row);
+  }
+  $("#arsenal-cart-count").textContent = String(count);
+  $("#arsenal-cart-total").textContent = total.toLocaleString("ru-RU");
+  $("#arsenal-commit").disabled = count === 0;
+  $("#arsenal-cart-status").textContent = unpriced ? "Позиции без фиксированной цены не входят в итог." : "";
+}
+
+function commitArsenalCart() {
+  if (!arsenalCart.size) return;
+  for (const {item, qty} of arsenalCart.values()) {
+    const existing = gearItems.find(row => row.catalogId === item.id);
+    if (existing) existing.qty = Math.max(1, num(existing.qty) || 1) + qty;
+    else gearItems.push({
+      catalogId: item.id, name: item.name, type: item.type,
+      stats: [formatArmoryStats(item.stats), item.weight && `Вес ${item.weight}`, item.price == null ? item.priceLabel || "Цена не указана" : `Цена ${item.price} Тр.`, item.availability, item.unit].filter(Boolean).join(" · "),
+      qty, price: item.price, availability: item.availability, sourcePage: item.sourcePage,
+    });
+  }
+  arsenalCart.clear(); renderGear(); renderArsenalCart(); renderArsenalCatalog();
+  sheetDirty = true; flashSave(); $("#arsenal-cart-status").textContent = "Добавлено в лист персонажа.";
+}
+
 function renderGear() {
   const preview = $("#gear-preview-list"), rows = $("#gear-rows");
-  const visible = gearItems.map((item, index) => ({ ...item, editable: true, index }));
-  preview.replaceChildren();
-  rows.replaceChildren();
-  for (const item of visible) {
+  preview.replaceChildren(); rows.replaceChildren();
+  for (const [index, item] of gearItems.entries()) {
+    const quantity = Math.max(1, num(item.qty) || 1);
     const card = document.createElement("div"); card.className = "item";
     const info = document.createElement("div"), name = document.createElement("b"), type = document.createElement("small"), stats = document.createElement("em");
-    name.textContent = item.name; type.textContent = item.type || "Предмет"; stats.textContent = item.stats || "";
+    name.textContent = item.name + (quantity > 1 ? ` ×${quantity}` : ""); type.textContent = item.type || "Предмет"; stats.textContent = item.stats || "";
     info.append(name, type); card.append(info, stats); preview.appendChild(card);
     const tr = document.createElement("tr");
     for (const key of ["name", "type", "stats"]) {
       const td = document.createElement("td"), input = document.createElement("input");
       input.className = "gear-edit-input"; input.value = item[key] || ""; input.setAttribute("aria-label", key);
-      if (item.editable) input.addEventListener("change", () => { gearItems[item.index][key] = input.value.trim(); sheetDirty = true; flashSave(); renderGear(); });
+      input.addEventListener("change", () => { gearItems[index][key] = input.value.trim(); sheetDirty = true; flashSave(); renderGear(); });
       td.appendChild(input); tr.appendChild(td);
     }
+    const qtyCell = document.createElement("td"), qtyInput = document.createElement("input");
+    qtyInput.className = "gear-qty-input"; qtyInput.type = "number"; qtyInput.min = "1"; qtyInput.step = "1"; qtyInput.value = String(quantity); qtyInput.setAttribute("aria-label", `Количество: ${item.name}`);
+    qtyInput.addEventListener("change", () => { gearItems[index].qty = Math.max(1, num(qtyInput.value) || 1); sheetDirty = true; flashSave(); renderGear(); });
+    qtyCell.appendChild(qtyInput); tr.appendChild(qtyCell);
     const delCell = document.createElement("td"), del = document.createElement("button");
     del.type = "button"; del.className = "skill-delete"; del.textContent = "×"; del.setAttribute("aria-label", `Удалить ${item.name}`);
-    if (item.editable) del.onclick = () => { gearItems.splice(item.index, 1); sheetDirty = true; flashSave(); renderGear(); };
+    del.onclick = () => { gearItems.splice(index, 1); sheetDirty = true; flashSave(); renderGear(); };
     delCell.appendChild(del); tr.appendChild(delCell); rows.appendChild(tr);
   }
-  $("#gear-count").textContent = String(visible.length);
-  if (!visible.length) preview.innerHTML = '<p class="skill-empty">Снаряжение не записано.</p>';
+  const count = gearItems.reduce((sum, item) => sum + Math.max(1, num(item.qty) || 1), 0);
+  $("#gear-count").textContent = String(count);
+  $("#gear-inventory-count").textContent = String(count);
+  if (!gearItems.length) preview.innerHTML = '<p class="skill-empty">Снаряжение не записано.</p>';
 }
 
 function setGearMode(managing) {
   $("#gear-overview").hidden = managing;
   $("#gear-management").hidden = !managing;
   $("#secondary-grid").classList.toggle("managing", managing);
-  if (managing) renderGear();
+  if (managing) { renderGear(); renderArsenalCatalog(); renderArsenalCart(); }
 }
 
 function toggleStateEditor(force) {
@@ -1234,6 +1403,39 @@ async function logout() {
   }
 }
 
+function initArsenalControls() {
+  $$(".arsenal-category").forEach(button => button.addEventListener("click", () => {
+    $$(".arsenal-category").forEach(category => category.classList.remove("active"));
+    button.classList.add("active"); arsenalPage = 1; renderArsenalCatalog();
+  }));
+  $("#arsenal-search").addEventListener("input", () => { arsenalPage = 1; renderArsenalCatalog(); renderArsenalSuggestions(); });
+  $("#arsenal-search").addEventListener("focus", renderArsenalSuggestions);
+  for (const selector of ["#arsenal-market", "#arsenal-kind", "#arsenal-availability", "#arsenal-sort"]) {
+    $(selector).addEventListener("input", () => { arsenalPage = 1; renderArsenalCatalog(); });
+    $(selector).addEventListener("change", () => { arsenalPage = 1; renderArsenalCatalog(); });
+  }
+  // Обновлять список и при наборе цены, и при завершении редактирования поля.
+  for (const selector of ["#arsenal-price-from", "#arsenal-price-to"]) {
+    $(selector).addEventListener("input", () => { arsenalPage = 1; renderArsenalCatalog(); });
+    $(selector).addEventListener("change", () => { arsenalPage = 1; renderArsenalCatalog(); });
+  }
+  $("#arsenal-reset").addEventListener("click", () => {
+    arsenalPage = 1;
+    $("#arsenal-search").value = "";
+    $("#arsenal-market").value = "all";
+    $("#arsenal-kind").value = "all";
+    $("#arsenal-availability").value = "all";
+    $("#arsenal-price-from").value = "";
+    $("#arsenal-price-to").value = "";
+    $("#arsenal-sort").value = "relevance";
+    $(".arsenal-category.active").classList.remove("active");
+    $(".arsenal-category[data-arsenal-category='all']").classList.add("active");
+    renderArsenalCatalog();
+  });
+  document.addEventListener("click", event => { if (!event.target.closest(".arsenal-search-wrap")) $("#arsenal-suggestions").hidden = true; });
+  $("#arsenal-commit").addEventListener("click", commitArsenalCart);
+}
+
 /* ---------- запуск ---------- */
 async function init() {
   buildChars();
@@ -1292,17 +1494,18 @@ async function init() {
     event.preventDefault();
     const name = $("#talent-add-name").value;
     if (!name) { $("#talent-message").textContent = "Сначала выбери талант."; return; }
-    addTalentRow(name, $("#talent-add-note").value.trim());
+    addTalentRow(name, $("#talent-add-note").value.trim() || undefined);
     event.currentTarget.reset(); $("#talent-message").textContent = "";
     sheetDirty = true; recalc(); flashSave();
   });
   $("#btn-gear-manage").addEventListener("click", () => setGearMode(true));
   $("#btn-gear-overview").addEventListener("click", () => setGearMode(false));
+  initArsenalControls();
   $("#gear-add-form").addEventListener("submit", event => {
     event.preventDefault();
     const name = $("#gear-new-name").value.trim();
     if (!name) return;
-    gearItems.push({ name, type: $("#gear-new-type").value.trim(), stats: $("#gear-new-stats").value.trim() });
+    gearItems.push({ name, type: $("#gear-new-type").value.trim(), stats: $("#gear-new-stats").value.trim(), qty: 1 });
     event.currentTarget.reset(); $("#gear-message").textContent = "";
     sheetDirty = true; renderGear(); flashSave();
   });
