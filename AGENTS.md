@@ -1,10 +1,10 @@
 # Project instructions
 
-- This project is a small, dependency-free browser application using plain HTML, CSS, and JavaScript.
-- Keep the Russian-language UI and the existing visual style unless the task asks to change them.
-- Preserve compatibility with the current `localStorage` data and XML import/export format unless a migration is explicitly requested.
-- Keep game rules and reference data in separate SQLite tables initialized from `reference_seed.json` by `server.py`; keep application behavior in `app.js` and markup in `index.html`.
-- Make the smallest change that satisfies the request. Avoid unrelated refactors, new frameworks, and dependencies.
-- Before editing, inspect the relevant code and the current working-tree changes. Do not overwrite unrelated user changes.
-- After editing, inspect the diff and run checks that are available in the repository. Do not claim a check passed if it was not run.
-- Keep long sessions compact: inspect only relevant file sections, avoid repeating prior findings or reproducing large data, and use concise progress notes with decisions, changed files, checks, and the next action. Give agents only the context needed for their task.
+- The frontend uses plain HTML/CSS/JavaScript; `server.py` provides the Python-standard-library API and SQLite storage. Keep the Russian UI and existing visual style unless asked otherwise.
+- Preserve existing SQLite/`localStorage` data, migration paths, and XML import/export compatibility. Change formats or add migrations only when explicitly requested.
+- Keep reference datasets and table-driven rule parameters in dedicated SQLite tables, seeded from `reference_seed.json` by `server.py`. Keep rule/application logic in `app.js` and markup in `index.html`.
+- Make the smallest focused change. Avoid unrelated refactors, frameworks, and dependencies.
+- Delegate to an agent when parallel exploration, implementation, or independent review would add meaningful value; skip trivial or routine tasks.
+- Before editing, inspect relevant code and working-tree changes; preserve unrelated user changes.
+- After editing, review the diff and run relevant checks available in the repository. Report only checks actually run.
+- Keep sessions efficient: inspect only relevant sections, avoid repeating findings or dumping large data, and give agents only necessary context. For multi-step work, send concise progress updates; summarize changed files and checks in the final response when applicable.

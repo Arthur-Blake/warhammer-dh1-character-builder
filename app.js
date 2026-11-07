@@ -9,6 +9,8 @@ const d5  = () => Math.ceil(d10() / 2);               // d10: 1-2→1 … 9-10�
 const num = v => parseInt(v, 10) || 0;
 
 let uidSeq = 0;
+let charEditMode = false;
+let skillHintsVisible = true;
 
 /* ---------- загружаемые справочники ---------- */
 let WORLDS = [];
@@ -87,7 +89,8 @@ function buildChars() {
     card.dataset.stat = c.key;
     card.innerHTML =
       `<label>${c.name}</label><strong id="val_${c.key}">—</strong>` +
-      `<small><span id="roll_${c.key}">—</span> · <span id="fix_${c.key}"></span></small>`;
+      `<input class="stat-edit-input" id="edit_${c.key}" data-stat-edit="${c.key}" type="number" inputmode="numeric" step="1" placeholder="—" aria-label="Базовое значение: ${c.name}" hidden>` +
+      `<small><span id="roll_${c.key}">—</span><span id="stat-separator_${c.key}"> · </span><span id="fix_${c.key}"></span></small>`;
     root.appendChild(card);
     for (const prefix of ["base_", "adv_"]) {
       const input = document.createElement("input");
@@ -100,6 +103,16 @@ function buildChars() {
 }
 const fmtMod = m => (m >= 0 ? "+" : "") + m;
 
+function setCharEditMode(enabled) {
+  charEditMode = enabled;
+  const button = $("#btn-edit-chars");
+  const label = enabled ? "Показать характеристики с модификаторами" : "Редактировать базовые значения характеристик";
+  button.setAttribute("aria-pressed", String(enabled));
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  $("#stats-kicker").textContent = enabled ? "База · без модификаторов" : "Итог · бонус";
+}
+
 function getVal(key) {
   const base = document.querySelector(`input[data-key="base_${key}"]`);
   const adv  = document.querySelector(`input[data-key="adv_${key}"]`);
@@ -111,12 +124,21 @@ function recalc() {
   const vals = {};
   const world = curWorld();
   for (const c of CHARS) {
+    const baseValue = $("input[data-key='base_" + c.key + "']").value;
     const extra = charFixes(c.key).reduce((sum, f) => sum + f.v, 0);
     const v = getVal(c.key) + (world ? world.mods[c.key] : 0) + extra;
     vals[c.key] = v;
     $("#val_" + c.key).textContent = v || "—";
-    $("#roll_" + c.key).textContent = $("input[data-key='base_" + c.key + "']").value || "—";
+    $("#roll_" + c.key).textContent = baseValue || "—";
     $("#fix_" + c.key).textContent = fixBreakdown(c.key);
+    const card = $(`[data-stat="${c.key}"]`);
+    const editInput = $("#edit_" + c.key);
+    if (editInput.value !== baseValue) editInput.value = baseValue;
+    editInput.hidden = !charEditMode;
+    $("#val_" + c.key).hidden = charEditMode;
+    $("#roll_" + c.key).hidden = charEditMode;
+    $("#stat-separator_" + c.key).hidden = charEditMode;
+    card.classList.toggle("editing", charEditMode);
   }
   const bio = curBio();
   const bioCost = bio ? bio.cost : 0;
@@ -185,9 +207,16 @@ function addSkillRow(name = "", lvl = "untrained", src = "manual") {
 
   if (name) sel.value = name;
   lvlSel.value = lvl;
-  sel.onchange    = () => { sheetDirty = true; calcSkillRow(tr); flashSave(); };
-  lvlSel.onchange = () => { sheetDirty = true; calcSkillRow(tr); flashSave(); };
+  updateSkillHint(sel);
+  sel.onchange    = () => { updateSkillHint(sel); sheetDirty = true; calcSkillRow(tr); renderSkillPreview(); flashSave(); };
+  lvlSel.onchange = () => { sheetDirty = true; calcSkillRow(tr); renderSkillPreview(); flashSave(); };
   calcSkillRow(tr);
+}
+
+function updateSkillHint(select) {
+  const hint = skillHintsVisible ? findSkillText(select.value) : "";
+  if (hint) select.title = hint;
+  else select.removeAttribute("title");
 }
 
 /* если имени нет в стандартном списке — добавить опцию в соответствующий optgroup */
@@ -510,6 +539,7 @@ function apply(data) {
       }
     }
     renderNotes();
+    setCharEditMode(false);
     recalc();
     updateBioStatus();
     renderCareerPreview();
@@ -1187,8 +1217,17 @@ function renderSkillPreview() {
     const item = document.createElement("div"); item.className = "skill-preview";
     const meta = document.createElement("div"); meta.className = "skill-preview-meta";
     const title = document.createElement("span"); title.textContent = name;
+    const description = skillHintsVisible ? findSkillText(name) : "";
+    if (description) title.title = description;
     const levelLabel = document.createElement("small"); levelLabel.textContent = levelSelect.selectedOptions[0]?.textContent || "";
     meta.append(title, levelLabel);
+    if (description) {
+      const hint = document.createElement("small");
+      hint.className = "skill-preview-hint";
+      hint.textContent = description;
+      hint.title = description;
+      meta.appendChild(hint);
+    }
     const attr = tr.children[1].textContent.trim();
     const characteristic = document.createElement("span"); characteristic.className = "skill-characteristic"; characteristic.textContent = attr || "—";
     const score = document.createElement("strong"); score.textContent = tr.children[3].textContent.trim() || "—";
@@ -1198,6 +1237,17 @@ function renderSkillPreview() {
   $("#skill-count").textContent = String(count);
   if (!basicRoot.children.length) basicRoot.innerHTML = '<p class="skill-empty">Нет базовых навыков.</p>';
   if (!trainedRoot.children.length) trainedRoot.innerHTML = '<p class="skill-empty">Нет обученных навыков.</p>';
+}
+
+function toggleSkillHints() {
+  skillHintsVisible = !skillHintsVisible;
+  const label = skillHintsVisible ? "Скрыть подсказки" : "Показать подсказки";
+  for (const button of [$("#btn-skill-hints"), $("#btn-skill-hints-manage")]) {
+    button.textContent = label;
+    button.setAttribute("aria-label", label);
+  }
+  for (const select of $$("#skills-tbody .sk-name")) updateSkillHint(select);
+  renderSkillPreview();
 }
 
 function renderTalentPreview() {
@@ -1749,6 +1799,10 @@ async function init() {
   $("#sel-career").addEventListener("change", onCareerChange);
   $("#sel-bio").addEventListener("change", onBioChange);
   $("#btn-roll-chars").addEventListener("click", rollAllChars);
+  $("#btn-edit-chars").addEventListener("click", () => {
+    setCharEditMode(!charEditMode);
+    recalc();
+  });
   $("#btn-print").addEventListener("click", () => window.print());
   $("#btn-hint").addEventListener("click", buildHint);
   $("#btn-delete-character").addEventListener("click", () => deleteCharacter(currentCharId));
@@ -1778,6 +1832,8 @@ async function init() {
   });
   $("#btn-skill-manage").addEventListener("click", () => setSkillMode("manage"));
   $("#btn-skill-overview").addEventListener("click", () => setSkillMode("overview"));
+  $("#btn-skill-hints").addEventListener("click", toggleSkillHints);
+  $("#btn-skill-hints-manage").addEventListener("click", toggleSkillHints);
   $("#btn-talent-manage").addEventListener("click", () => setTalentMode(true));
   $("#btn-talent-overview").addEventListener("click", () => setTalentMode(false));
   $("#skill-add-form").addEventListener("submit", event => {
@@ -1832,6 +1888,12 @@ async function init() {
   }
 
   document.addEventListener("input", event => {
+    const statKey = event.target.dataset.statEdit;
+    if (statKey) {
+      $(`input[data-key="base_${statKey}"]`).value = event.target.value;
+      sheetDirty = true; recalc(); flashSave();
+      return;
+    }
     if (!event.target.matches("[data-key]")) return;
     sheetDirty = true; recalc(); flashSave();
   });
