@@ -24,10 +24,14 @@ import sys
 import traceback
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 # Каталог проекта — тот, где лежит server.py
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__)) or "."
 DB_PATH = os.path.join(PROJECT_DIR, "characters.sqlite3")
+REFERENCE_SEED_PATH = os.path.join(PROJECT_DIR, "reference_seed.json")
+# Increment this when changing the seed; only reference tables are reseeded.
+REFERENCE_DATA_VERSION = 2
 SESSION_COOKIE = "dh1_session"
 SESSION_DAYS = 30
 PASSWORD_MIN = 4
@@ -74,7 +78,124 @@ def init_db():
         columns = {row[1] for row in conn.execute("PRAGMA table_info(characters)")}
         if "user_id" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE")
+        create_reference_tables(conn)
+        seed_reference_tables(conn)
         conn.commit()
+
+
+def create_reference_tables(conn):
+    """Создаёт отдельную таблицу для каждого набора игровых справочников."""
+    definitions = [
+        "CREATE TABLE IF NOT EXISTS reference_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS worlds (id TEXT PRIMARY KEY, position INTEGER NOT NULL, data TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS chars (key TEXT PRIMARY KEY, position INTEGER NOT NULL, name TEXT NOT NULL, abbr TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS careers (id TEXT PRIMARY KEY, position INTEGER NOT NULL, data TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS skill_list (position INTEGER PRIMARY KEY, data TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS skill_groups (name TEXT PRIMARY KEY, position INTEGER NOT NULL, data TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS skill_texts (name TEXT PRIMARY KEY, position INTEGER NOT NULL, text TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS biographies (id TEXT PRIMARY KEY, position INTEGER NOT NULL, data TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS talents (name TEXT PRIMARY KEY, position INTEGER NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS sanctions (dice_range TEXT PRIMARY KEY, position INTEGER NOT NULL, effect TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS carry_table (position INTEGER PRIMARY KEY, value REAL NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS talent_effects (name TEXT PRIMARY KEY, position INTEGER NOT NULL, effect TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS armory_catalog (id TEXT PRIMARY KEY, position INTEGER NOT NULL, data TEXT NOT NULL)",
+    ]
+    for sql in definitions:
+        conn.execute(sql)
+
+
+def seed_reference_tables(conn):
+    """Импортирует начальные справочники один раз на версию, одной транзакцией."""
+    row = conn.execute(
+        "SELECT value FROM reference_meta WHERE key = 'data_version'"
+    ).fetchone()
+    if row and int(row[0]) >= REFERENCE_DATA_VERSION:
+        return
+
+    with open(REFERENCE_SEED_PATH, "r", encoding="utf-8") as seed_file:
+        seed = json.load(seed_file)
+
+    for table in (
+        "worlds", "chars", "careers", "skill_list", "skill_groups", "skill_texts",
+        "biographies", "talents", "sanctions", "carry_table", "talent_effects", "armory_catalog",
+    ):
+        conn.execute(f"DELETE FROM {table}")
+
+    encode = lambda value: json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    conn.executemany(
+        "INSERT INTO worlds (id, position, data) VALUES (?, ?, ?)",
+        [(item["id"], i, encode(item)) for i, item in enumerate(seed["worlds"])],
+    )
+    conn.executemany(
+        "INSERT INTO chars (key, position, name, abbr) VALUES (?, ?, ?, ?)",
+        [(item["key"], i, item["name"], item["abbr"]) for i, item in enumerate(seed["chars"])],
+    )
+    conn.executemany(
+        "INSERT INTO careers (id, position, data) VALUES (?, ?, ?)",
+        [(item["id"], i, encode(item)) for i, item in enumerate(seed["careers"])],
+    )
+    conn.executemany(
+        "INSERT INTO skill_list (position, data) VALUES (?, ?)",
+        [(i, encode(item)) for i, item in enumerate(seed["skill_list"])],
+    )
+    conn.executemany(
+        "INSERT INTO skill_groups (name, position, data) VALUES (?, ?, ?)",
+        [(name, i, encode(items)) for i, (name, items) in enumerate(seed["skill_groups"].items())],
+    )
+    conn.executemany(
+        "INSERT INTO skill_texts (name, position, text) VALUES (?, ?, ?)",
+        [(name, i, text) for i, (name, text) in enumerate(seed["skill_texts"].items())],
+    )
+    conn.executemany(
+        "INSERT INTO biographies (id, position, data) VALUES (?, ?, ?)",
+        [(item["id"], i, encode(item)) for i, item in enumerate(seed["biographies"])],
+    )
+    conn.executemany(
+        "INSERT INTO talents (name, position) VALUES (?, ?)",
+        [(name, i) for i, name in enumerate(seed["talents"])],
+    )
+    conn.executemany(
+        "INSERT INTO sanctions (dice_range, position, effect) VALUES (?, ?, ?)",
+        [(dice_range, i, effect) for i, (dice_range, effect) in enumerate(seed["sanctions"].items())],
+    )
+    conn.executemany(
+        "INSERT INTO carry_table (position, value) VALUES (?, ?)",
+        [(i, value) for i, value in enumerate(seed["carry_table"])],
+    )
+    conn.executemany(
+        "INSERT INTO talent_effects (name, position, effect) VALUES (?, ?, ?)",
+        [(name, i, effect) for i, (name, effect) in enumerate(seed["talent_effects"].items())],
+    )
+    conn.executemany(
+        "INSERT INTO armory_catalog (id, position, data) VALUES (?, ?, ?)",
+        [(item["id"], i, encode(item)) for i, item in enumerate(seed["armory_catalog"])],
+    )
+    conn.execute(
+        "INSERT INTO reference_meta (key, value) VALUES ('data_version', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (str(REFERENCE_DATA_VERSION),),
+    )
+
+
+def read_reference_tables(conn):
+    """Собирает таблицы в структуру, ожидаемую приложением."""
+    conn.row_factory = sqlite3.Row
+    decode = lambda row: json.loads(row["data"])
+    return {
+        "version": REFERENCE_DATA_VERSION,
+        "worlds": [decode(row) for row in conn.execute("SELECT data FROM worlds ORDER BY position")],
+        "chars": [dict(row) for row in conn.execute("SELECT key, name, abbr FROM chars ORDER BY position")],
+        "careers": [decode(row) for row in conn.execute("SELECT data FROM careers ORDER BY position")],
+        "skill_list": [decode(row) for row in conn.execute("SELECT data FROM skill_list ORDER BY position")],
+        "skill_groups": {row["name"]: json.loads(row["data"]) for row in conn.execute("SELECT name, data FROM skill_groups ORDER BY position")},
+        "skill_texts": {row["name"]: row["text"] for row in conn.execute("SELECT name, text FROM skill_texts ORDER BY position")},
+        "biographies": [decode(row) for row in conn.execute("SELECT data FROM biographies ORDER BY position")],
+        "talents": [row["name"] for row in conn.execute("SELECT name FROM talents ORDER BY position")],
+        "sanctions": {row["dice_range"]: row["effect"] for row in conn.execute("SELECT dice_range, effect FROM sanctions ORDER BY position")},
+        "carry_table": [row["value"] for row in conn.execute("SELECT value FROM carry_table ORDER BY position")],
+        "talent_effects": {row["name"]: row["effect"] for row in conn.execute("SELECT name, effect FROM talent_effects ORDER BY position")},
+        "armory_catalog": [decode(row) for row in conn.execute("SELECT data FROM armory_catalog ORDER BY position")],
+    }
 
 
 def now_iso():
@@ -130,6 +251,7 @@ def send_text(handler, status, text, content_type="text/plain; charset=utf-8"):
 
 def serve_static(handler, path):
     """Отдаёт файл из PROJECT_DIR. Корень `/` → index.html."""
+    path = urlsplit(path).path
     if path == "/":
         rel = "index.html"
     else:
@@ -137,6 +259,13 @@ def serve_static(handler, path):
         rel = os.path.normpath(path.lstrip("/"))
         if rel.startswith("..") or os.path.isabs(rel):
             send_text(handler, 403, "Forbidden")
+            return
+
+    if rel != "index.html":
+        filename = os.path.basename(rel).lower()
+        extension = os.path.splitext(filename)[1]
+        if filename in {"characters.sqlite3", "reference_seed.json"} or extension not in STATIC_EXTENSIONS:
+            send_text(handler, 404, "Not found")
             return
 
     full = os.path.join(PROJECT_DIR, rel)
@@ -411,6 +540,10 @@ class Handler(BaseHTTPRequestHandler):
             self._api_get_one(int(m.group(1)), user_id)
         elif self.path == "/api/characters":
             self._api_list(user_id)
+        elif self.path == "/api/reference-data":
+            with sqlite3.connect(DB_PATH) as conn:
+                payload = read_reference_tables(conn)
+            send_json(self, 200, payload)
         else:
             send_text(self, 404, "Not found")
 

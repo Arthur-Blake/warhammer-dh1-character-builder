@@ -2,13 +2,13 @@
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "orchestrator",
   "tool_output": {
-    "max_lines": 1200,
-    "max_bytes": 32768
+    "max_lines": 600,
+    "max_bytes": 16384
   },
   "compaction": {
     "auto": true,
     "keep": {
-      "tokens": 8000
+      "tokens": 4000
     },
     "buffer": "15%"
   },

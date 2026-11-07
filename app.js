@@ -10,6 +10,21 @@ const num = v => parseInt(v, 10) || 0;
 
 let uidSeq = 0;
 
+/* ---------- загружаемые справочники ---------- */
+let WORLDS = [];
+let CHARS = [];
+let CAREERS = [];
+let SKILL_LIST = [];
+let SKILL_GROUPS = {};
+let SKILL_TEXTS = {};
+let SKILLS = [];
+let BIOGRAPHIES = [];
+let TALENTS = [];
+let SANCTIONS = {};
+let CARRY_TABLE = [];
+let TALENT_EFFECTS = {};
+let ARMORY_CATALOG = [];
+
 /* ---------- серверное хранилище ---------- */
 const API_PREFIX = "/api";
 const LS_ID_KEY = "dh1e-current-id-v1";     // id текущего персонажа
@@ -123,7 +138,7 @@ function recalc() {
 function addSkillRow(name = "", lvl = "untrained", src = "manual") {
   const tb = $("#skills-tbody");
   const tr = document.createElement("tr");
-  if (src === "bio") tr.dataset.src = "bio";
+  if (src !== "manual") tr.dataset.src = src;
 
   const sel = document.createElement("select");
   sel.dataset.key = "sk" + (++uidSeq);
@@ -211,20 +226,19 @@ function calcSkillRow(tr) {
   const world = curWorld();
   const base = getVal(opt.dataset.char) + (world ? world.mods[opt.dataset.char] : 0) +
     charFixes(opt.dataset.char).reduce((sum, fix) => sum + fix.v, 0);
-  let mod = 0, tag = "";
+  let mod = 0;
   let target = base;
-  if (selLvl.value === "basic") { target = Math.floor(base / 2); tag = "базовое"; }
-  else if (selLvl.value === "untrained") { tag = "без обучения (0)"; }
-  else if (selLvl.value === "trained") { mod = 10; tag = "обучено +10"; }
-  else if (selLvl.value === "mastery") { mod = 20; tag = "владение +20"; }
-  goalTd.textContent = base ? `${target + mod} ${tag}` : "—";
+  if (selLvl.value === "basic") target = Math.floor(base / 2);
+  else if (selLvl.value === "trained") mod = 10;
+  else if (selLvl.value === "mastery") mod = 20;
+  goalTd.textContent = base ? String(target + mod) : "—";
 }
 
 /* ---------- таланты ---------- */
 function addTalentRow(name = "", note, src = "manual") {
   const tb = $("#talents-tbody");
   const tr = document.createElement("tr");
-  if (src === "bio") tr.dataset.src = "bio";
+  if (src !== "manual") tr.dataset.src = src;
 
   const sel = document.createElement("select");
   sel.dataset.key = "tl" + (++uidSeq) + "_n";
@@ -439,12 +453,12 @@ function apply(data) {
       .map(t => t.split("|").map(unescField));
     for (const parts of unpack(data.__skills)) {
       const [name, lvl, src] = parts;
-      if (name) addSkillRow(name, lvl || "untrained", src === "bio" ? "bio" : "manual");
+      if (name) addSkillRow(name, lvl || "untrained", ["bio", "career"].includes(src) ? src : "manual");
     }
     for (const parts of unpack(data.__talents)) {
       const [name, note, src] = parts;
       if (name || note) {
-        const source = src === "bio" ? "bio" : "manual";
+        const source = ["bio", "career"].includes(src) ? src : "manual";
         addTalentRow(name, source === "bio" && !note ? findTalentText(name) : (note || ""), source);
       }
     }
@@ -498,6 +512,7 @@ function apply(data) {
     renderNotes();
     recalc();
     updateBioStatus();
+    renderCareerPreview();
   } finally {
     isApplying = wasApplying;
   }
@@ -881,6 +896,179 @@ function updateBioStatus() {
   $("#bio-status").title = description;
 }
 
+function splitCareerOptions(value) {
+  return String(value || "").split(/\s+или\s+/i).map(item => item.trim()).filter(Boolean);
+}
+
+function splitCareerGearOptions(value) {
+  return splitCareerOptions(value).flatMap(item => item.split(/\s*\/\s*/).map(option => option.trim()).filter(Boolean));
+}
+
+function careerPackage(career) {
+  if (!career) return { skills: [], talents: [], gear: [] };
+  return {
+    skills: (career.skills || []).map(splitCareerOptions),
+    talents: (career.talents || []).map(splitCareerOptions),
+    // Снаряжение в справочнике дано коротким списком через точку с запятой;
+    // не пытаемся превращать фрагменты с «или» в несколько выданных предметов.
+    gear: String(career.gear || "").split(";").map(item => item.trim().replace(/[.]+$/, "")).filter(item => item && item !== "—").map(splitCareerGearOptions),
+  };
+}
+
+function normalizeArmoryName(value) {
+  return String(value || "").normalize("NFKC").toLocaleLowerCase("ru")
+    .replace(/ё/g, "е").replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/\s+/g, " ");
+}
+
+function findArmoryItemByName(name) {
+  const normalized = normalizeArmoryName(name);
+  const matches = ARMORY_CATALOG.filter(item => normalizeArmoryName(item.name) === normalized);
+  return matches.sort((a, b) => Number(b.market === "general") - Number(a.market === "general") ||
+    String(a.id).localeCompare(String(b.id), "en"))[0] || null;
+}
+
+function resolveCareerGearOption(career, option) {
+  const definitions = career.gearMap?.[option] || [{ name: option }];
+  return definitions.map(definition => ({
+    item: findArmoryItemByName(definition.name),
+    qty: Math.max(1, num(definition.qty) || 1),
+    note: definition.note || "",
+  }));
+}
+
+function careerGearOptionLabel(career, option) {
+  const resolved = resolveCareerGearOption(career, option);
+  if (resolved.some(entry => !entry.item)) return `⚠ Нет в арсенале: ${option}`;
+  return resolved.map(({ item, qty }) => `${item.name}${qty > 1 ? ` ×${qty}` : ""}`).join(" + ");
+}
+
+function currentCareerSelections(pack) {
+  const names = kind => {
+    if (kind === "skills") return new Set($$("#skills-tbody tr[data-src='career']").map(tr => tr.querySelector(".sk-name").value));
+    if (kind === "talents") return new Set($$("#talents-tbody tr[data-src='career']").map(tr => tr.querySelector(".talent-name").value));
+    return gearItems.filter(item => item.source === "career");
+  };
+  return Object.fromEntries(["skills", "talents", "gear"].map(kind => {
+    const existing = names(kind);
+    if (kind === "gear") return [kind, pack.gear.map((options, index) => {
+      const selected = existing.find(item => item.careerGearIndex === index)?.careerGearOption;
+      return Math.max(0, options.findIndex(option => option === selected));
+    })];
+    return [kind, pack[kind].map(options => Math.max(0, options.findIndex(option => existing.has(option))))];
+  }));
+}
+
+function renderCareerPreview() {
+  const root = $("#career-preview");
+  const career = CAREERS.find(item => item.id === $("#sel-career").value);
+  root.replaceChildren();
+  root.hidden = !career;
+  if (!career) return;
+
+  const pack = careerPackage(career);
+  const selections = currentCareerSelections(pack);
+  const heading = document.createElement("div");
+  heading.className = "career-preview-heading";
+  const title = document.createElement("b"); title.textContent = `Стартовый набор · ${career.name}`;
+  const missingGear = pack.gear.flatMap((options, index) => {
+    const option = options[selections.gear[index] || 0];
+    return option && resolveCareerGearOption(career, option).some(entry => !entry.item) ? [option] : [];
+  });
+  const hint = document.createElement("small");
+  hint.textContent = missingGear.length
+    ? `Не найдено в арсенале и не добавлено: ${missingGear.join("; ")}`
+    : "Добавлен в лист. Варианты можно изменить здесь.";
+  heading.append(title, hint); root.appendChild(heading);
+
+  const labels = { gear: "Снаряжение", talents: "Таланты", skills: "Навыки" };
+  for (const kind of ["gear", "talents", "skills"]) {
+    const entries = pack[kind];
+    const section = document.createElement("section"); section.className = "career-preview-section";
+    const sectionTitle = document.createElement("h3"); sectionTitle.textContent = labels[kind]; section.appendChild(sectionTitle);
+    if (!entries.length) {
+      const empty = document.createElement("small"); empty.textContent = "Не указаны"; section.appendChild(empty);
+    }
+    entries.forEach((options, index) => {
+      const row = document.createElement("div"); row.className = "career-preview-item";
+      if (options.length > 1) {
+        const select = document.createElement("select");
+        select.className = "career-package-choice";
+        select.dataset.kind = kind; select.dataset.index = String(index);
+        options.forEach((option, optionIndex) => select.appendChild(new Option(
+          kind === "gear" ? careerGearOptionLabel(career, option) : option,
+          String(optionIndex),
+        )));
+        select.value = String(selections[kind][index] || 0);
+        row.appendChild(select);
+      } else {
+        const option = options[0] || "—";
+        const text = document.createElement("span");
+        text.textContent = kind === "gear" ? careerGearOptionLabel(career, option) : option;
+        if (kind === "gear" && resolveCareerGearOption(career, option).some(entry => !entry.item))
+          text.classList.add("career-gear-unmatched");
+        text.title = option;
+        row.appendChild(text);
+      }
+      section.appendChild(row);
+    });
+    root.appendChild(section);
+  }
+  root.querySelectorAll(".career-package-choice").forEach(select => {
+    select.addEventListener("change", () => {
+      const nextSelections = { skills: [], talents: [], gear: [] };
+      root.querySelectorAll(".career-package-choice").forEach(choice => {
+        nextSelections[choice.dataset.kind][Number(choice.dataset.index)] = Number(choice.value);
+      });
+      applyCareerPackage(career, nextSelections);
+      renderCareerPreview();
+      recalc();
+      sheetDirty = true;
+      flashSave();
+    });
+  });
+}
+
+function applyCareerPackage(career, selections = null) {
+  // Переключение профессии заменяет только автоматически выданные строки.
+  for (const tr of $$("#skills-tbody tr[data-src='career'], #talents-tbody tr[data-src='career']")) tr.remove();
+  gearItems = gearItems.filter(item => item.source !== "career");
+  if (!career) return;
+
+  const pack = careerPackage(career);
+  const choices = selections || { skills: [], talents: [], gear: [] };
+  const existingSkills = new Set($$("#skills-tbody .sk-name").map(select => select.value).filter(Boolean));
+  const existingTalents = new Set($$("#talents-tbody .talent-name").map(select => select.value).filter(Boolean));
+  const existingGear = new Set(gearItems.flatMap(item => [item.catalogId, normalizeArmoryName(item.name)]).filter(Boolean));
+  for (const [index, options] of pack.skills.entries()) {
+    const name = options[choices.skills[index] || 0];
+    if (name && !existingSkills.has(name)) { addSkillRow(name, "untrained", "career"); existingSkills.add(name); }
+  }
+  for (const [index, options] of pack.talents.entries()) {
+    const name = options[choices.talents[index] || 0];
+    if (name && !existingTalents.has(name)) { addTalentRow(name, findTalentText(name), "career"); existingTalents.add(name); }
+  }
+  for (const [index, options] of pack.gear.entries()) {
+    const option = options[choices.gear[index] || 0];
+    for (const { item, qty, note } of resolveCareerGearOption(career, option)) {
+      if (!item) continue;
+      const key = item.id || normalizeArmoryName(item.name);
+      const nameKey = normalizeArmoryName(item.name);
+      if (!existingGear.has(key) && !existingGear.has(nameKey)) {
+        gearItems.push({
+          catalogId: item.id, name: item.name, type: item.type,
+          stats: [formatArmoryStats(item.stats), item.weight && `Вес ${item.weight}`,
+            item.price == null ? item.priceLabel || "Цена не указана" : `Цена ${item.price} Тр.`,
+            item.availability, item.unit, note].filter(Boolean).join(" · "),
+          qty, price: item.price, availability: item.availability, sourcePage: item.sourcePage,
+          source: "career", careerGearIndex: index, careerGearOption: option,
+        });
+        existingGear.add(key);
+        existingGear.add(nameKey);
+      }
+    }
+  }
+}
+
 /* удалить все строки, добавленные текущей биографией */
 function clearBioRows() {
   for (const tr of $$("#skills-tbody tr[data-src='bio']")) tr.remove();
@@ -917,6 +1105,8 @@ function onCareerChange() {
   // если старая биография всё ещё в списке — оставляем выбранной
   if (oldBio && oldBio.career === careerId) $("#sel-bio").value = oldBioId;
   updateBioStatus();
+  applyCareerPackage(CAREERS.find(item => item.id === careerId));
+  renderCareerPreview();
   showCareerKit(true);
   sheetDirty = true;
   flashSave();
@@ -1174,6 +1364,43 @@ function formatArmoryStats(stats) {
     .replace(/(^|[·\s])Пер:/g, "$1Перезарядка:");
 }
 
+function armoryItemIcon(item) {
+  if (item.category === "armor") return "⛨";
+  if (item.category === "weapon") {
+    const type = `${item.type || ""} ${item.kind || ""}`.toLocaleLowerCase("ru");
+    if (/пистолет/.test(type)) return "⌖";
+    if (/метатель|лук|арбалет|throw/.test(type)) return "➶";
+    if (/ranged|дистанц|основное/.test(type)) return "➤";
+    return "⚔";
+  }
+  if (item.category === "service") return "⌂";
+  if (item.category === "ammo") return "▣";
+  return "✦";
+}
+
+function gearEntryIcon(item) {
+  const catalogItem = ARMORY_CATALOG.find(entry => entry.id === item.catalogId);
+  if (catalogItem) return armoryItemIcon(catalogItem);
+  const type = String(item.type || "").toLocaleLowerCase("ru");
+  if (/брон/.test(type)) return "⛨";
+  if (/пистолет/.test(type)) return "⌖";
+  if (/метатель|лук|арбалет/.test(type)) return "➶";
+  if (/оруж|ближн|рукопаш/.test(type)) return "⚔";
+  if (/боеприпас|патрон|заряд/.test(type)) return "▣";
+  if (/услуг/.test(type)) return "⌂";
+  return "✦";
+}
+
+function gearDisplayStats(item) {
+  const catalogItem = ARMORY_CATALOG.find(entry => entry.id === item.catalogId);
+  const isWeapon = catalogItem?.category === "weapon" || /оруж/i.test(item.type || "") || /^(?:основное|пистолет|ближний бой|рукопашное)$/i.test(item.type || "");
+  const rarities = new Set(["Изобильная", "Обильная", "Распространённая", "Средняя", "Скудная", "Редкая", "Раритет", "Особая", "Индивидуальная"]);
+  return String(item.stats || "").split("·").map(part => part.trim()).filter(part =>
+    part && !/^(?:Вес|Цена)(?:\s|$)/i.test(part) && !/^за\s+обойму[.!]?$/i.test(part) &&
+    !(isWeapon && /^Класс\s*:/i.test(part)) && !rarities.has(part)
+  ).join(" · ");
+}
+
 function renderArsenalCatalog() {
   const root = $("#arsenal-results"), results = getFilteredArmoryItems();
   const pageCount = Math.ceil(results.length / ARSENAL_PAGE_SIZE);
@@ -1187,7 +1414,7 @@ function renderArsenalCatalog() {
   const marketNames = {general:"Общий рынок",feral:"Дикие / феодальные",hive:"Миры-ульи",forge:"Миры-кузницы",frontier:"Миры-фронтиры",void:"Пустота",warzone:"Зона боевых действий",ordos:"Святые Ордосы"};
   for (const item of visible) {
     const card = document.createElement("article"); card.className = "arsenal-item";
-    const icon = document.createElement("div"); icon.className = "arsenal-item-icon"; icon.textContent = item.category === "armor" ? "⛨" : item.category === "weapon" ? "⚔" : item.category === "service" ? "⌂" : item.category === "ammo" ? "▣" : "✦";
+    const icon = document.createElement("div"); icon.className = "arsenal-item-icon"; icon.textContent = armoryItemIcon(item);
     const main = document.createElement("div"); main.className = "arsenal-item-main";
     const title = document.createElement("div"); title.className = "arsenal-item-title";
     const name = document.createElement("b"); name.textContent = item.name;
@@ -1282,10 +1509,46 @@ function renderGear() {
   preview.replaceChildren(); rows.replaceChildren();
   for (const [index, item] of gearItems.entries()) {
     const quantity = Math.max(1, num(item.qty) || 1);
-    const card = document.createElement("div"); card.className = "item";
-    const info = document.createElement("div"), name = document.createElement("b"), type = document.createElement("small"), stats = document.createElement("em");
-    name.textContent = item.name + (quantity > 1 ? ` ×${quantity}` : ""); type.textContent = item.type || "Предмет"; stats.textContent = item.stats || "";
-    info.append(name, type); card.append(info, stats); preview.appendChild(card);
+    const card = document.createElement("article"); card.className = "gear-entry-row";
+    card.dataset.gearIndex = String(index);
+    const dragHandle = document.createElement("span"); dragHandle.className = "gear-entry-drag"; dragHandle.textContent = "⠿";
+    dragHandle.draggable = true;
+    dragHandle.setAttribute("role", "img"); dragHandle.setAttribute("aria-label", `Перетащить ${item.name}`); dragHandle.title = "Перетащить, чтобы изменить порядок";
+    const icon = document.createElement("div"); icon.className = "gear-entry-icon"; icon.textContent = gearEntryIcon(item);
+    const info = document.createElement("div"); info.className = "gear-entry-info";
+    const name = document.createElement("b"), type = document.createElement("small"), stats = document.createElement("span");
+    name.textContent = item.name; type.textContent = item.type || "Предмет"; stats.textContent = gearDisplayStats(item);
+    info.append(name, type);
+    if (stats.textContent) info.appendChild(stats);
+    const controls = document.createElement("div"); controls.className = "gear-entry-controls";
+    const previewQtyInput = document.createElement("input");
+    previewQtyInput.className = "gear-entry-quantity"; previewQtyInput.type = "number"; previewQtyInput.min = "1"; previewQtyInput.step = "1"; previewQtyInput.value = String(quantity);
+    previewQtyInput.setAttribute("aria-label", `Количество: ${item.name}`);
+    previewQtyInput.addEventListener("change", () => {
+      gearItems[index].qty = Math.max(1, num(previewQtyInput.value) || 1);
+      sheetDirty = true; flashSave(); renderGear();
+    });
+    const previewDelete = document.createElement("button"); previewDelete.type = "button"; previewDelete.className = "skill-delete"; previewDelete.textContent = "×";
+    previewDelete.setAttribute("aria-label", `Удалить ${item.name}`); previewDelete.title = "Удалить снаряжение";
+    previewDelete.addEventListener("click", () => { gearItems.splice(index, 1); sheetDirty = true; flashSave(); renderGear(); });
+    controls.append(previewQtyInput, previewDelete);
+    card.append(dragHandle, icon, info, controls);
+    dragHandle.addEventListener("dragstart", event => {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(index));
+      card.classList.add("dragging");
+    });
+    dragHandle.addEventListener("dragend", () => card.classList.remove("dragging"));
+    card.addEventListener("dragover", event => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; });
+    card.addEventListener("drop", event => {
+      event.preventDefault();
+      const from = Number(event.dataTransfer.getData("text/plain"));
+      if (!Number.isInteger(from) || from < 0 || from >= gearItems.length || from === index) return;
+      const [moved] = gearItems.splice(from, 1);
+      gearItems.splice(index, 0, moved);
+      sheetDirty = true; flashSave(); renderGear();
+    });
+    preview.appendChild(card);
     const tr = document.createElement("tr");
     for (const key of ["name", "type", "stats"]) {
       const td = document.createElement("td"), input = document.createElement("input");
@@ -1437,6 +1700,41 @@ function initArsenalControls() {
 }
 
 /* ---------- запуск ---------- */
+async function loadReferenceData() {
+  const response = await fetch(`${API_PREFIX}/reference-data`);
+  if (!response.ok) throw new Error("Не удалось загрузить игровые справочники. Проверь сервер и повтори вход.");
+  const data = await response.json();
+  const required = [
+    "worlds", "chars", "careers", "skill_list", "skill_groups", "skill_texts",
+    "biographies", "talents", "sanctions", "carry_table", "talent_effects", "armory_catalog",
+  ];
+  if (required.some(key => data[key] == null)) {
+    throw new Error("Сервер вернул неполные игровые справочники. Обнови приложение.");
+  }
+
+  WORLDS = data.worlds;
+  CHARS = data.chars;
+  CAREERS = data.careers;
+  SKILL_LIST = data.skill_list;
+  SKILL_GROUPS = data.skill_groups;
+  SKILL_TEXTS = data.skill_texts;
+  BIOGRAPHIES = data.biographies;
+  TALENTS = data.talents;
+  SANCTIONS = data.sanctions;
+  CARRY_TABLE = data.carry_table;
+  TALENT_EFFECTS = data.talent_effects;
+  ARMORY_CATALOG = data.armory_catalog;
+
+  SKILLS = [];
+  for (const [name, type, char] of SKILL_LIST) {
+    if (SKILL_GROUPS[name]) {
+      for (const sub of SKILL_GROUPS[name])
+        SKILLS.push({ name: name.replace("*", "") + " (" + sub + ")", type, char });
+    } else SKILLS.push({ name, type, char });
+  }
+  SKILLS.sort((a, b) => a.name.localeCompare(b.name, "ru"));
+}
+
 async function init() {
   buildChars();
   for (const world of WORLDS) $("#sel-world").appendChild(new Option(world.name, world.id));
@@ -1595,6 +1893,14 @@ function setAuthMode(mode) {
 
 async function openApplication(user) {
   authUser = user;
+  try {
+    await loadReferenceData();
+  } catch (error) {
+    $("#auth-screen").hidden = false;
+    $("#app-shell").hidden = true;
+    $("#auth-message").textContent = error.message;
+    throw error;
+  }
   $("#auth-screen").hidden = true;
   $("#app-shell").hidden = false;
   await init();
@@ -1645,7 +1951,9 @@ async function startApplication() {
       return;
     }
   } catch (error) {
-    $("#auth-message").textContent = "Нет соединения с сервером. Запусти приложение через python server.py.";
+    $("#auth-message").textContent = error.message === "Failed to fetch"
+      ? "Нет соединения с сервером. Запусти приложение через python server.py."
+      : error.message;
   }
   $("#auth-screen").hidden = false;
 }
