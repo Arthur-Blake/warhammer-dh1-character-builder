@@ -16,6 +16,7 @@ let skillHintsVisible = true;
 let WORLDS = [];
 let CHARS = [];
 let CAREERS = [];
+let CAREER_ADVANCEMENTS = [];
 let SKILL_LIST = [];
 let SKILL_GROUPS = {};
 let SKILL_TEXTS = {};
@@ -153,32 +154,21 @@ function recalc() {
   renderProfile();
   renderState();
   renderGear();
+  updateCareerAdvancementStatus();
   if (sheetDirty && !isApplying) flashSave();   // чистый только что загруженный лист не отправляем
 }
 
 /* ---------- умения ---------- */
-function addSkillRow(name = "", lvl = "untrained", src = "manual") {
+function addSkillRow(name = "", lvl = "untrained", src = "manual", selectedChoiceKey = "", xpCost = 0) {
   const tb = $("#skills-tbody");
   const tr = document.createElement("tr");
   if (src !== "manual") tr.dataset.src = src;
+  tr.dataset.xpCost = String(Math.max(0, num(xpCost)));
 
   const sel = document.createElement("select");
   sel.dataset.key = "sk" + (++uidSeq);
   sel.className = "sk-name";
-  const ogBase = document.createElement("optgroup"); ogBase.label = "Базовые";
-  const ogAdv  = document.createElement("optgroup"); ogAdv.label  = "Продвинутые";
-  for (const s of SKILLS) {
-    const o = document.createElement("option");
-    const char = CHARS.find(x => x.key === s.char);
-    o.value = s.name; o.textContent = `${s.name} [${char ? char.abbr : "?"}]`;
-    o.dataset.type = s.type; o.dataset.char = s.char;
-    (s.type === "b" ? ogBase : ogAdv).appendChild(o);
-  }
-  sel.appendChild(new Option(""));
-  sel.appendChild(ogBase); sel.appendChild(ogAdv);
-
-  // динамическая опция, если имя не из списка
-  ensureSkillOption(sel, name);
+  populateSkillSelect(sel, availableSkillGroups(), "", name, Boolean(name));
 
   const lvlSel = document.createElement("select");
   lvlSel.dataset.key = sel.dataset.key + "_lvl";
@@ -201,14 +191,29 @@ function addSkillRow(name = "", lvl = "untrained", src = "manual") {
   const lvlTd  = document.createElement("td"); lvlTd.appendChild(lvlSel);
   const delTd  = document.createElement("td"); delTd.className = "del";
   delTd.innerHTML = `<button type="button">✕</button>`;
-  delTd.querySelector("button").onclick = () => { tr.remove(); sheetDirty = true; flashSave(); recalc(); };
+  delTd.querySelector("button").onclick = () => {
+    const xpCost = Math.max(0, num(tr.dataset.xpCost));
+    if (xpCost) {
+      const xpSpent = num($("input[data-key=xpSpent]").value);
+      $("input[data-key=xpSpent]").value = String(Math.max(0, xpSpent - xpCost));
+    }
+    tr.remove(); sheetDirty = true; flashSave(); recalc();
+  };
   tr.append(nameTd, charTd, lvlTd, goalTd, delTd);
   tb.appendChild(tr);
 
   if (name) sel.value = name;
+  if (selectedChoiceKey) {
+    const selectedOption = Array.from(sel.options).find(option => option.dataset.choiceKey === selectedChoiceKey);
+    if (selectedOption) selectedOption.selected = true;
+  }
   lvlSel.value = lvl;
   updateSkillHint(sel);
-  sel.onchange    = () => { updateSkillHint(sel); sheetDirty = true; calcSkillRow(tr); renderSkillPreview(); flashSave(); };
+  sel.onchange    = () => {
+    const advancementLevel = sel.selectedOptions[0]?.dataset.level;
+    if (advancementLevel) lvlSel.value = advancementLevel;
+    updateSkillHint(sel); sheetDirty = true; calcSkillRow(tr); renderSkillPreview(); flashSave();
+  };
   lvlSel.onchange = () => { sheetDirty = true; calcSkillRow(tr); renderSkillPreview(); flashSave(); };
   calcSkillRow(tr);
 }
@@ -219,33 +224,6 @@ function updateSkillHint(select) {
   else select.removeAttribute("title");
 }
 
-/* если имени нет в стандартном списке — добавить опцию в соответствующий optgroup */
-function ensureSkillOption(sel, name) {
-  if (!name) return;
-  const exists = Array.from(sel.options).some(o => o.value === name);
-  if (exists) return;
-  // пытаемся угадать группу по префиксу
-  let base = name, sub = "";
-  const m = name.match(/^(.+?)\s*\((.+)\)$/);
-  if (m) { base = m[1].trim() + "*"; sub = m[2].trim(); }
-  const proto = SKILLS.find(s => s.name === name);
-  if (proto) return; // уже должно быть — на всякий случай
-  const group = SKILL_GROUPS[base];
-  // ищем базовый шаблон в SKILL_LIST
-  const tpl = SKILL_LIST.find(x => x[0] === base || x[0] === base.replace("*",""));
-  const type = tpl ? tpl[1] : "a";
-  const char = tpl ? tpl[2] : "int";
-  const option = document.createElement("option");
-  option.value = name;
-  const abbr = CHARS.find(x => x.key === char)?.abbr || "?";
-  option.textContent = `${name} [${abbr}]`;
-  option.dataset.type = type;
-  option.dataset.char = char;
-  const label = type === "b" ? "Базовые" : "Продвинутые";
-  const og = Array.from(sel.querySelectorAll("optgroup")).find(g => g.label === label);
-  if (og) og.appendChild(option);
-  else sel.appendChild(option);
-}
 function calcSkillRow(tr) {
   const [selName, selLvl] = tr.querySelectorAll("select");
   const opt = selName.selectedOptions[0];
@@ -272,16 +250,7 @@ function addTalentRow(name = "", note, src = "manual") {
   const sel = document.createElement("select");
   sel.dataset.key = "tl" + (++uidSeq) + "_n";
   sel.className = "talent-name";
-  // ВАЖНО: плейсхолдер добавляем ПЕРВЫМ — при добавлении опций в пустой select
-  // первая опция автоматически становится выбранной (HTML spec), и вставка
-  // плейсхолдера перед ней потом selectedIndex не сбрасывает
-  sel.appendChild(new Option(""));
-  for (const t of TALENTS) { const o = document.createElement("option"); o.textContent = t; sel.appendChild(o); }
-
-  // динамическая опция, если имя не из списка
-  if (name && !TALENTS.includes(name)) {
-    const o = document.createElement("option"); o.textContent = name; sel.appendChild(o);
-  }
+  populateTalentSelect(sel, availableTalentGroups(), "", name, Boolean(name));
 
   const noteEl = document.createElement("input");
   noteEl.type = "text";
@@ -348,12 +317,50 @@ function addWeaponRow(values = null) {
 // overwriteRank=true только при явной смене профессии пользователем;
 // при восстановлении/импорте (false) сохранённый ранг не затирается
 function showCareerKit(overwriteRank = true) {
-  const c = CAREERS.find(x => x.id === $("#sel-career").value);
-  const rank = $("input[data-key=rank]");
-  if (c && (overwriteRank || !rank.value)) rank.value = c.rank;
-  else if (!c && overwriteRank) rank.value = "";
+  const rank = $(`[data-key="rank"]`);
+  updateCharacterRankOptions({ preferredRank: overwriteRank ? "" : rank.value, defaultToLowest: overwriteRank || !rank.value });
+  refreshAdvancementSelectors();
   renderProfile();
   recalc();
+}
+
+function updateCharacterRankOptions({ preferredRank = "", defaultToLowest = false } = {}) {
+  const select = $("#profile-rank");
+  if (!select) return;
+
+  const career = CAREERS.find(item => item.id === $("#sel-career").value);
+  const world = curWorld();
+  const careerRanks = CAREER_ADVANCEMENTS.filter(item => item.career === career?.id);
+  const eligibleRanks = careerRanks
+    .filter(item => !world || item.worlds.includes(world.id))
+    .sort((a, b) => a.minXp - b.minXp);
+  const availableNames = new Set(eligibleRanks.map(item => item.rank));
+  const careerRankNames = new Set(careerRanks.map(item => item.rank));
+  select.replaceChildren(new Option("— выбери ранг —", ""));
+
+  const addedNames = new Set();
+  for (const item of eligibleRanks) {
+    if (!addedNames.has(item.rank)) {
+      select.appendChild(new Option(item.rank, item.rank));
+      addedNames.add(item.rank);
+    }
+  }
+
+  const requestedRank = String(preferredRank || "");
+  let selectedRank = "";
+  if (!defaultToLowest && requestedRank && availableNames.has(requestedRank)) {
+    selectedRank = requestedRank;
+  } else if (!defaultToLowest && requestedRank && !careerRankNames.has(requestedRank)) {
+    // Сохраняем старые/импортированные значения, которых нет в новой таблице рангов.
+    select.appendChild(new Option(requestedRank, requestedRank));
+    selectedRank = requestedRank;
+  } else if (eligibleRanks.length) {
+    selectedRank = eligibleRanks[0].rank;
+  } else if (!careerRanks.length && career?.rank) {
+    select.appendChild(new Option(career.rank, career.rank));
+    selectedRank = career.rank;
+  }
+  select.value = selectedRank;
 }
 
 /* ---------- броски ---------- */
@@ -445,7 +452,7 @@ function collect() {
     return rows.join(";");
   };
   data.__skills = packRows($("#skills-tbody"),
-    tr => [tr.children[0].lastChild.value, tr.children[2].firstChild.value, tr.dataset.src || "manual"]);
+    tr => [tr.children[0].lastChild.value, tr.children[2].firstChild.value, tr.dataset.src || "manual", tr.dataset.xpCost || "0"]);
   data.__talents = packRows($("#talents-tbody"),
     tr => [tr.querySelector(".talent-name").value, tr.querySelector(".talent-note").value, tr.dataset.src || "manual"]);
   data.bioId = $("#sel-bio").value;
@@ -481,8 +488,8 @@ function apply(data) {
     const unpack = s => (s || "").split(";").filter(Boolean)
       .map(t => t.split("|").map(unescField));
     for (const parts of unpack(data.__skills)) {
-      const [name, lvl, src] = parts;
-      if (name) addSkillRow(name, lvl || "untrained", ["bio", "career"].includes(src) ? src : "manual");
+      const [name, lvl, src, xpCost] = parts;
+      if (name) addSkillRow(name, lvl || "untrained", ["bio", "career"].includes(src) ? src : "manual", "", xpCost);
     }
     for (const parts of unpack(data.__talents)) {
       const [name, note, src] = parts;
@@ -531,7 +538,9 @@ function apply(data) {
     const savedBioId = data.bioId || "";
     if (savedBioId) {
       const career = $("#sel-career").value;
-      const bio = BIOGRAPHIES.find(b => b.id === savedBioId && b.career === career);
+      const world = curWorld();
+      const bio = BIOGRAPHIES.find(b => b.id === savedBioId && b.career === career &&
+        (!world || !b.worlds?.length || b.worlds.includes(world.id)));
       if (bio) {
         $("#sel-bio").value = savedBioId;
         $("#sel-bio").dataset.prev = savedBioId;
@@ -540,6 +549,8 @@ function apply(data) {
     }
     renderNotes();
     setCharEditMode(false);
+    updateCharacterRankOptions({ preferredRank: data.rank, defaultToLowest: !data.rank });
+    refreshAdvancementSelectors();
     recalc();
     updateBioStatus();
     renderCareerPreview();
@@ -896,14 +907,235 @@ function buildHint() {
 function populateBioSelect() {
   const sel = $("#sel-bio");
   const careerId = $("#sel-career").value;
-  const list = careerId ? BIOGRAPHIES.filter(b => b.career === careerId) : [];
+  const selectedId = sel.value;
+  const world = curWorld();
+  const list = careerId ? BIOGRAPHIES.filter(b => b.career === careerId &&
+    (!world || !b.worlds?.length || b.worlds.includes(world.id))) : [];
   sel.innerHTML = `<option value="">— биография не куплена —</option>`;
   for (const b of list) sel.appendChild(new Option(`${b.name} (${b.cost} ОО)`, b.id));
+  if (list.some(b => b.id === selectedId)) sel.value = selectedId;
+}
+
+function availableTalentGroups() {
+  const groups = [];
+  const addGroup = (label, options) => {
+    const sorted = options.filter(item => item.name).sort((a, b) => a.name.localeCompare(b.name, "ru"));
+    if (sorted.length) groups.push({ label, options: sorted });
+  };
+  const career = CAREERS.find(item => item.id === $("#sel-career").value);
+  const world = curWorld();
+
+  if (world) {
+    const features = (world.hwFeatures || []).map(feature => `${feature.n || ""} ${feature.t || ""}`).join(" ").toLocaleLowerCase("ru");
+    addGroup(`Мир · ${world.name}`,
+      TALENTS.filter(name => features.includes(name.toLocaleLowerCase("ru"))).map(name => ({ name, cost: 0 })));
+  }
+
+  if (career) {
+    addGroup(`Стартовый набор · ${career.name}`,
+      careerPackage(career).talents.flat().map(name => ({ name, cost: 0 })));
+
+    const bio = curBio();
+    if (bio && (!world || !bio.worlds?.length || bio.worlds.includes(world.id)))
+      addGroup(`Биография · ${bio.name} (${bio.cost} ОО)`, (bio.talents || []).map(name => ({ name, cost: 0 })));
+
+    const ranks = CAREER_ADVANCEMENTS
+      .filter(item => item.career === career.id && (!world || item.worlds.includes(world.id)))
+      .sort((a, b) => a.minXp - b.minXp);
+    const selectedRank = ranks.find(item => item.rank === $("#profile-rank").value);
+    if (selectedRank) {
+      for (const rank of ranks.filter(item => item.minXp <= selectedRank.minXp)) {
+        addGroup(`Ранг · ${rank.rank}`,
+          (rank.advancements || []).filter(item => item.type === "talent")
+            .map(item => ({ name: item.name, cost: item.cost, requirements: item.requirements || "" })));
+      }
+    }
+  }
+
+  return groups;
+}
+
+function skillMeta(name) {
+  const known = SKILLS.find(skill => skill.name === name);
+  if (known) return known;
+  const match = name.match(/^(.+?)\s*\((.+)\)$/);
+  const base = match ? `${match[1].trim()}*` : name;
+  const template = SKILL_LIST.find(item => item[0] === base || item[0] === base.replace("*", ""));
+  return { name, type: template?.[1] || "a", char: template?.[2] || "int" };
+}
+
+function skillAdvancementOption(item) {
+  const match = item.name.match(/^(.*?)\s*(\+10|\+20)$/);
+  return {
+    name: match ? match[1].trim() : item.name,
+    displayName: item.name,
+    cost: item.cost,
+    requirements: item.requirements || "",
+    level: match ? (match[2] === "+10" ? "trained" : "mastery") : "",
+  };
+}
+
+function normalizeHomeworldSkill(value) {
+  const name = String(value || "").trim();
+  const suffix = name.match(/\s+\(([^()]*)\)$/);
+  return suffix && CHARS.some(char => char.abbr === suffix[1]) ? name.slice(0, suffix.index).trim() : name;
+}
+
+function availableSkillGroups() {
+  const groups = [];
+  const addGroup = (label, skills) => {
+    for (const type of ["b", "a"]) {
+      const unique = new Map();
+      for (const item of skills) {
+        if (!item.name) continue;
+        const meta = skillMeta(item.name);
+        if (meta.type !== type) continue;
+        unique.set(`${item.name}\u0000${item.displayName || item.name}\u0000${item.cost ?? 0}\u0000${item.level || ""}`,
+          { ...meta, ...item, cost: item.cost ?? 0 });
+      }
+      const options = [...unique.values()].sort((a, b) => a.name.localeCompare(b.name, "ru"));
+      if (options.length)
+        groups.push({ label: `${label} · ${type === "b" ? "Базовые" : "Продвинутые"}`, options });
+    }
+  };
+
+  const career = CAREERS.find(item => item.id === $("#sel-career").value);
+  const world = curWorld();
+  if (world) addGroup(`Мир · ${world.name}`,
+    (world.hwSkills || []).map(value => ({ name: normalizeHomeworldSkill(value), cost: 0 })));
+
+  if (career) {
+    addGroup(`Стартовый набор · ${career.name}`,
+      careerPackage(career).skills.flat().map(name => ({ name, cost: 0 })));
+
+    const bio = curBio();
+    if (bio && (!world || !bio.worlds?.length || bio.worlds.includes(world.id)))
+      addGroup(`Биография · ${bio.name} (${bio.cost} ОО)`,
+        [...(bio.skills || []), ...(bio.skillBasic || [])].map(name => ({ name, cost: 0 })));
+
+    const ranks = CAREER_ADVANCEMENTS
+      .filter(item => item.career === career.id && (!world || item.worlds.includes(world.id)))
+      .sort((a, b) => a.minXp - b.minXp);
+    const selectedRank = ranks.find(item => item.rank === $("#profile-rank").value);
+    if (selectedRank) {
+      for (const rank of ranks.filter(item => item.minXp <= selectedRank.minXp))
+        addGroup(`Ранг · ${rank.rank}`,
+          (rank.advancements || []).filter(item => item.type === "skill")
+            .map(skillAdvancementOption));
+    }
+  }
+
+  return groups;
+}
+
+function availableSkillNames(groups = availableSkillGroups()) {
+  return [...new Set(groups.flatMap(group => group.options.map(item => item.name)))];
+}
+
+function populateSkillSelect(select, groups, placeholder, selected = "", preserveUnavailable = false, uniqueValues = false) {
+  select.replaceChildren(new Option(placeholder, ""));
+  const available = new Set();
+  for (const [groupIndex, group] of groups.entries()) {
+    const optgroup = document.createElement("optgroup");
+    optgroup.label = group.label;
+    for (const [itemIndex, item] of group.options.entries()) {
+      const abbr = CHARS.find(char => char.key === item.char)?.abbr || "?";
+      const requirements = item.requirements ? ` · Требования: ${item.requirements}` : "";
+      const option = new Option(`${item.displayName || item.name} [${abbr}] (${item.cost ?? 0} ОО)${requirements}`,
+        uniqueValues ? `skill-${groupIndex}-${itemIndex}` : item.name);
+      option.dataset.choiceKey = `${groupIndex}-${itemIndex}`;
+      option.dataset.skillName = item.name;
+      option.dataset.type = item.type;
+      option.dataset.char = item.char;
+      option.dataset.cost = String(item.cost ?? 0);
+      if (item.level) option.dataset.level = item.level;
+      optgroup.appendChild(option);
+      available.add(item.name);
+    }
+    select.appendChild(optgroup);
+  }
+  if (selected && preserveUnavailable && !available.has(selected)) {
+    const meta = skillMeta(selected);
+    const abbr = CHARS.find(char => char.key === meta.char)?.abbr || "?";
+    const option = new Option(`${selected} [${abbr}] (уже в листе)`, selected);
+    option.dataset.type = meta.type;
+    option.dataset.char = meta.char;
+    select.appendChild(option);
+  }
+  select.value = selected && (available.has(selected) || preserveUnavailable) ? selected : "";
+}
+
+function refreshSkillSelectors() {
+  const groups = availableSkillGroups();
+  const available = new Set(availableSkillNames(groups));
+  const addSelect = $("#skill-add-name");
+  if (addSelect) {
+    populateSkillSelect(addSelect, groups, "— выбери навык —", "", false, true);
+  }
+  for (const select of $$(".sk-name")) {
+    const selected = select.value;
+    populateSkillSelect(select, groups, "", selected, Boolean(selected) && !available.has(selected));
+    updateSkillHint(select);
+  }
+}
+
+function availableTalentNames(groups = availableTalentGroups()) {
+  return [...new Set(groups.flatMap(group => group.options.map(item => item.name)))];
+}
+
+function populateTalentSelect(select, groups, placeholder, selected = "", preserveUnavailable = false, uniqueValues = false) {
+  select.replaceChildren(new Option(placeholder, ""));
+  const available = new Set();
+  for (const [groupIndex, group] of groups.entries()) {
+    const optgroup = document.createElement("optgroup");
+    optgroup.label = group.label;
+    for (const [itemIndex, item] of group.options.entries()) {
+      const requirements = item.requirements ? ` · Требования: ${item.requirements}` : "";
+      const option = new Option(`${item.name} (${item.cost ?? 0} ОО)${requirements}`,
+        uniqueValues ? `talent-${groupIndex}-${itemIndex}` : item.name);
+      option.dataset.talentName = item.name;
+      option.dataset.cost = String(item.cost ?? 0);
+      optgroup.appendChild(option);
+      available.add(item.name);
+    }
+    select.appendChild(optgroup);
+  }
+  if (selected && preserveUnavailable && !available.has(selected))
+    select.appendChild(new Option(`${selected} (уже в листе)`, selected));
+  select.value = selected && (available.has(selected) || preserveUnavailable) ? selected : "";
+}
+
+function refreshAdvancementSelectors() {
+  const groups = availableTalentGroups();
+  const available = new Set(availableTalentNames(groups));
+  const addSelect = $("#talent-add-name");
+  if (addSelect) {
+    populateTalentSelect(addSelect, groups, "— выбери талант —", "", false, true);
+  }
+
+  for (const select of $$(".talent-name")) {
+    const selected = select.value;
+    populateTalentSelect(select, groups, "", selected, Boolean(selected) && !available.has(selected));
+  }
+  refreshSkillSelectors();
 }
 
 function bioCost(id = $("#sel-bio").value) {
   const b = id ? BIOGRAPHIES.find(x => x.id === id) : null;
   return b ? b.cost : 0;
+}
+
+function chargeAdvancementXP(option, message) {
+  const cost = Math.max(0, num(option?.dataset.cost));
+  const xpTotal = num($("input[data-key=xpTotal]").value);
+  const xpSpent = num($("input[data-key=xpSpent]").value);
+  const available = Math.max(0, xpTotal - xpSpent - bioCost());
+  if (cost > available) {
+    message.textContent = `Недостаточно ОО: нужно ${cost}, доступно ${available}.`;
+    return false;
+  }
+  if (cost) $("input[data-key=xpSpent]").value = String(xpSpent + cost);
+  return true;
 }
 
 function bioDescription(bio) {
@@ -1043,6 +1275,7 @@ function renderCareerPreview() {
     });
     root.appendChild(section);
   }
+  renderCareerAdvancements(root, career);
   root.querySelectorAll(".career-package-choice").forEach(select => {
     select.addEventListener("change", () => {
       const nextSelections = { skills: [], talents: [], gear: [] };
@@ -1056,6 +1289,98 @@ function renderCareerPreview() {
       flashSave();
     });
   });
+}
+
+function renderCareerAdvancements(root, career) {
+  const world = curWorld();
+  const ranks = CAREER_ADVANCEMENTS
+    .filter(item => item.career === career.id && (!world || item.worlds.includes(world.id)));
+  const details = document.createElement("details");
+  details.className = "career-advancements";
+  const summary = document.createElement("summary");
+  summary.textContent = `Ранговые улучшения · ${ranks.length} рангов`;
+  details.appendChild(summary);
+  if (!ranks.length) {
+    const empty = document.createElement("p");
+    empty.textContent = "Для этого класса ранговые таблицы не найдены.";
+    details.appendChild(empty);
+    root.appendChild(details);
+    return;
+  }
+
+  const eligibleRanks = ranks;
+  const controls = document.createElement("div");
+  controls.className = "career-advancement-controls";
+  const label = document.createElement("label");
+  label.textContent = "Таблица улучшений для ранга";
+  const select = document.createElement("select");
+  select.className = "career-advancement-rank";
+  const currentRank = $("[data-key=rank]")?.value;
+  for (const rank of eligibleRanks) {
+    const option = new Option(`${rank.rank} · ${rank.minXp}–${rank.maxXp} ОО`, rank.rank);
+    select.appendChild(option);
+  }
+  const spent = currentCareerSpentXP();
+  const currentTier = eligibleRanks.filter(rank => rank.minXp <= spent && rank.maxXp >= spent);
+  if (currentTier.some(rank => rank.rank === currentRank)) select.value = currentRank;
+  else if (currentTier.length) select.value = currentTier[0].rank;
+  else if (eligibleRanks.length) select.value = eligibleRanks[0].rank;
+  label.appendChild(select);
+  const status = document.createElement("small");
+  status.className = "career-advancement-status";
+  status.dataset.careerAdvancementStatus = "";
+  controls.append(label, status);
+  details.appendChild(controls);
+
+  const tableWrap = document.createElement("div");
+  tableWrap.className = "table-scroll";
+  const table = document.createElement("table");
+  table.className = "skill-table career-advancement-table";
+  table.innerHTML = "<thead><tr><th>Улучшение</th><th>Тип</th><th>Цена</th><th>Требования</th></tr></thead>";
+  const tbody = document.createElement("tbody");
+  table.appendChild(tbody);
+  tableWrap.appendChild(table);
+  details.appendChild(tableWrap);
+
+  const renderRows = () => {
+    const rank = eligibleRanks.find(item => item.rank === select.value);
+    tbody.replaceChildren();
+    const spent = currentCareerSpentXP();
+    status.textContent = rank
+      ? (spent >= rank.minXp ? `Достигнут при ${spent} потраченных ОО (биография учтена). Предыдущие ранги доступны · таблица, стр. ${rank.sourcePage}.` : `Откроется при ${rank.minXp} потраченных ОО; сейчас ${spent} с учётом биографии · стр. ${rank.sourcePage}.`)
+      : (world ? `Таблицы этого класса недоступны для мира «${world.name}».` : "Выбери мир, чтобы увидеть доступные таблицы.");
+    for (const item of (rank?.advancements || [])) {
+      const tr = document.createElement("tr");
+      const name = document.createElement("td");
+      name.textContent = item.name + (item.repeatLimit ? ` (до ${item.repeatLimit} раз)` : "");
+      if (item.sourceNote) name.title = item.sourceNote;
+      const type = document.createElement("td"); type.textContent = item.type === "skill" ? "Умение" : "Талант";
+      const cost = document.createElement("td"); cost.textContent = `${item.cost} ОО`;
+      const requirements = document.createElement("td"); requirements.textContent = item.requirements || "—";
+      tr.append(name, type, cost, requirements);
+      tbody.appendChild(tr);
+    }
+  };
+  select.addEventListener("change", renderRows);
+  details.addEventListener("toggle", () => { if (details.open) renderRows(); });
+  renderRows();
+  root.appendChild(details);
+}
+
+function updateCareerAdvancementStatus() {
+  const status = $("[data-career-advancement-status]");
+  const select = $(".career-advancement-rank");
+  if (!status || !select) return;
+  const career = CAREER_ADVANCEMENTS.find(item => item.career === $("#sel-career").value && item.rank === select.value);
+  if (!career) return;
+  const spent = currentCareerSpentXP();
+  status.textContent = spent >= career.minXp
+    ? `Достигнут при ${spent} потраченных ОО (биография учтена). Предыдущие ранги доступны · таблица, стр. ${career.sourcePage}.`
+    : `Откроется при ${career.minXp} потраченных ОО; сейчас ${spent} с учётом биографии · стр. ${career.sourcePage}.`;
+}
+
+function currentCareerSpentXP() {
+  return num($("input[data-key=xpSpent]")?.value) + bioCost();
 }
 
 function applyCareerPackage(career, selections = null) {
@@ -1151,6 +1476,7 @@ function onBioChange() {
 
   if (!newId) {
     $("#sel-bio").dataset.prev = "";
+    refreshAdvancementSelectors();
     updateBioStatus();
     recalc();
     sheetDirty = true;
@@ -1168,6 +1494,7 @@ function onBioChange() {
     flash(`недостаточно ОО: нужно ${bio.cost}, доступно ${xpTotal - xpSpent}`);
     $("#sel-bio").value = oldId;
     if (oldId) addBioRows(oldId);
+    refreshAdvancementSelectors();
     updateBioStatus();
     recalc();
     return;
@@ -1175,6 +1502,7 @@ function onBioChange() {
 
   addBioRows(newId);
   $("#sel-bio").dataset.prev = newId;
+  refreshAdvancementSelectors();
   updateBioStatus();
   recalc();
   sheetDirty = true;
@@ -1756,7 +2084,7 @@ async function loadReferenceData() {
   const data = await response.json();
   const required = [
     "worlds", "chars", "careers", "skill_list", "skill_groups", "skill_texts",
-    "biographies", "talents", "sanctions", "carry_table", "talent_effects", "armory_catalog",
+    "biographies", "career_advancements", "talents", "sanctions", "carry_table", "talent_effects", "armory_catalog",
   ];
   if (required.some(key => data[key] == null)) {
     throw new Error("Сервер вернул неполные игровые справочники. Обнови приложение.");
@@ -1765,6 +2093,7 @@ async function loadReferenceData() {
   WORLDS = data.worlds;
   CHARS = data.chars;
   CAREERS = data.careers;
+  CAREER_ADVANCEMENTS = data.career_advancements;
   SKILL_LIST = data.skill_list;
   SKILL_GROUPS = data.skill_groups;
   SKILL_TEXTS = data.skill_texts;
@@ -1789,12 +2118,21 @@ async function init() {
   buildChars();
   for (const world of WORLDS) $("#sel-world").appendChild(new Option(world.name, world.id));
   for (const career of CAREERS) $("#sel-career").appendChild(new Option(career.name, career.id));
-  for (const skill of SKILLS) $("#skill-add-name").appendChild(new Option(skill.name, skill.name));
-  for (const talent of TALENTS) $("#talent-add-name").appendChild(new Option(talent, talent));
   populateBioSelect();
+  refreshAdvancementSelectors();
 
   $("#sel-world").addEventListener("change", () => {
-    showCareerKit(false); sheetDirty = true; flashSave();
+    const bio = curBio();
+    if (bio && bio.worlds?.length && !bio.worlds.includes($("#sel-world").value)) {
+      clearBioRows();
+      $("#sel-bio").value = "";
+      $("#sel-bio").dataset.prev = "";
+    }
+    populateBioSelect();
+    updateBioStatus();
+    showCareerKit(false);
+    renderCareerPreview();
+    sheetDirty = true; flashSave();
   });
   $("#sel-career").addEventListener("change", onCareerChange);
   $("#sel-bio").addEventListener("change", onBioChange);
@@ -1838,16 +2176,25 @@ async function init() {
   $("#btn-talent-overview").addEventListener("click", () => setTalentMode(false));
   $("#skill-add-form").addEventListener("submit", event => {
     event.preventDefault();
-    const name = $("#skill-add-name").value;
+    const selectedOption = $("#skill-add-name").selectedOptions[0];
+    const name = selectedOption?.dataset.skillName || "";
     if (!name) { $("#skill-message").textContent = "Сначала выбери навык."; return; }
-    addSkillRow(name, $("#skill-add-level").value);
+    if (!chargeAdvancementXP(selectedOption, $("#skill-message"))) return;
+    addSkillRow(name, selectedOption.dataset.level || $("#skill-add-level").value,
+      "manual", selectedOption.dataset.choiceKey, selectedOption.dataset.cost);
     event.currentTarget.reset(); $("#skill-message").textContent = "";
     sheetDirty = true; recalc(); flashSave();
   });
+  $("#skill-add-name").addEventListener("change", event => {
+    const advancementLevel = event.currentTarget.selectedOptions[0]?.dataset.level;
+    if (advancementLevel) $("#skill-add-level").value = advancementLevel;
+  });
   $("#talent-add-form").addEventListener("submit", event => {
     event.preventDefault();
-    const name = $("#talent-add-name").value;
+    const selectedOption = $("#talent-add-name").selectedOptions[0];
+    const name = selectedOption?.dataset.talentName || "";
     if (!name) { $("#talent-message").textContent = "Сначала выбери талант."; return; }
+    if (!chargeAdvancementXP(selectedOption, $("#talent-message"))) return;
     addTalentRow(name, $("#talent-add-note").value.trim() || undefined);
     event.currentTarget.reset(); $("#talent-message").textContent = "";
     sheetDirty = true; recalc(); flashSave();
@@ -1880,6 +2227,7 @@ async function init() {
   $("#btn-profile-edit").addEventListener("click", openProfileEdit);
   $("#btn-profile-cancel").addEventListener("click", cancelProfileEdit);
   $("#btn-profile-save").addEventListener("click", saveProfile);
+  $("#profile-rank").addEventListener("change", () => { refreshAdvancementSelectors(); sheetDirty = true; recalc(); flashSave(); });
   for (const key of Object.keys(NOTE_BLOCKS)) {
     $(`[data-note-edit="${key}"]`).addEventListener("click", () => openNoteEditor(key));
     $(`[data-note-cancel="${key}"]`).addEventListener("click", () => cancelNoteEditor(key));
