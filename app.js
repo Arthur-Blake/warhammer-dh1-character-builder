@@ -1410,8 +1410,8 @@ function applyCareerPackage(career, selections = null) {
       const nameKey = normalizeArmoryName(item.name);
       if (!existingGear.has(key) && !existingGear.has(nameKey)) {
         gearItems.push({
-          catalogId: item.id, name: item.name, type: item.type,
-          stats: [formatArmoryStats(item.stats), item.weight && `Вес ${item.weight}`,
+          catalogId: item.id, name: item.name, type: gearTypeWithWeaponFeatures(item),
+          stats: [formatArmoryStats(gearStatsWithoutWeaponFeatures(item)), item.weight && `Вес ${item.weight}`,
             item.price == null ? item.priceLabel || "Цена не указана" : `Цена ${item.price} Тр.`,
             item.availability, item.unit, note].filter(Boolean).join(" · "),
           qty, price: item.price, availability: item.availability, sourcePage: item.sourcePage,
@@ -1633,7 +1633,6 @@ function renderState() {
 const NOTE_BLOCKS = {
   dossier: { field: "dossier", text: "#dossier-text", editor: "#dossier-editor", input: "#dossier-input" },
   merit: { field: "meritNotes", text: "#merit-text", editor: "#merit-editor", input: "#merit-input" },
-  field: { field: "fieldNotes", text: "#field-text", editor: "#field-editor", input: "#field-input" },
 };
 
 function renderNotes() {
@@ -1709,7 +1708,9 @@ function getFilteredArmoryItems() {
     return (!query || text.includes(query)) &&
       (category === "all" || item.category === category) &&
       marketMatch &&
-      (kind === "all" || item.kind === kind) &&
+      (kind === "all" || (kind === "weapon-upgrade"
+        ? String(item.type || "").trim().toLocaleLowerCase("ru") === "улучшение оружия"
+        : item.kind === kind)) &&
       (availability === "all" || item.availability === availability) &&
       (!hasPriceRange || (item.price != null && Number(item.price) >= from && Number(item.price) <= to));
   });
@@ -1738,8 +1739,158 @@ function formatArmoryStats(stats) {
     .replace(/(^|[·\s])Дист:/g, "$1Дальность:")
     .replace(/(^|[·\s])РоФ:/g, "$1Скорострельность:")
     .replace(/(^|[·\s])Бро:/g, "$1Бронебойность:")
+    .replace(/(^|[·\s])Бр:/g, "$1Броня:")
     .replace(/(^|[·\s])Об:/g, "$1Обойма:")
     .replace(/(^|[·\s])Пер:/g, "$1Перезарядка:");
+}
+
+function isGearWeapon(item) {
+  const catalogItem = ARMORY_CATALOG.find(entry => entry.id === item.catalogId);
+  if (item.category) return item.category === "weapon";
+  if (catalogItem?.category) return catalogItem.category === "weapon";
+  const type = String(item.type || "");
+  if (/(?:улучшение|модификация|аксессуар)\s+(?:оруж|брон)/i.test(type)) return false;
+  return /оруж/i.test(type) || /^(?:основное|пистолет(?:ы)?|ближний бой|рукопашное|метательное|тяж[её]лое|экзотическое)(?:[.,]|$)/i.test(type);
+}
+
+function isGearArmor(item) {
+  const catalogItem = ARMORY_CATALOG.find(entry => entry.id === item.catalogId);
+  if (item.category) return item.category === "armor";
+  if (catalogItem?.category) return catalogItem.category === "armor";
+  const type = String(item.type || "");
+  if (/(?:улучшение|модификация|аксессуар)\s+(?:оруж|брон)/i.test(type)) return false;
+  return /брон/i.test(type);
+}
+
+function gearWeaponKind(item) {
+  const catalogItem = ARMORY_CATALOG.find(entry => entry.id === item.catalogId);
+  return catalogItem?.kind || item.kind || (/ближн|рукопаш|melee/i.test(`${item.type || ""} ${item.stats || ""}`) ? "melee" : "ranged");
+}
+
+function gearQuality(item) {
+  return ["low", "good", "best"].includes(item.quality) ? item.quality : "normal";
+}
+
+function gearStackKey(item) {
+  if (!isGearWeapon(item) && !isGearArmor(item)) return "";
+  const normalize = value => String(value || "").trim().toLocaleLowerCase("ru").replace(/\s+/g, " ");
+  return JSON.stringify([
+    isGearWeapon(item) ? "weapon" : "armor",
+    item.catalogId || "",
+    normalize(item.name), normalize(item.type), normalize(item.stats),
+  ]);
+}
+
+function mergeGearStacks(item) {
+  const stackKey = gearStackKey(item);
+  if (!stackKey) return;
+  const stacks = new Map();
+  const originalItems = gearItems;
+  const mergedItems = [];
+  for (const candidate of originalItems) {
+    if (gearStackKey(candidate) !== stackKey) {
+      mergedItems.push(candidate);
+      continue;
+    }
+    const quality = gearQuality(candidate);
+    const stack = stacks.get(quality);
+    if (stack) stack.qty += Math.max(1, num(candidate.qty) || 1);
+    else {
+      stacks.set(quality, { item: candidate, qty: Math.max(1, num(candidate.qty) || 1) });
+      mergedItems.push(candidate);
+    }
+  }
+  for (const [quality, stack] of stacks) {
+    stack.item.quality = quality;
+    stack.item.qty = stack.qty;
+  }
+  gearItems = mergedItems;
+}
+
+function updateGearQuality(index, quality) {
+  const item = gearItems[index];
+  if (!item || gearQuality(item) === quality) return;
+  const quantity = Math.max(1, num(item.qty) || 1);
+  if (quantity > 1) {
+    item.qty = quantity - 1;
+    gearItems.splice(index + 1, 0, { ...item, qty: 1, quality });
+  } else {
+    item.quality = quality;
+  }
+  mergeGearStacks(item);
+  sheetDirty = true; flashSave(); renderGear();
+}
+
+function gearQualityEffect(item) {
+  const quality = gearQuality(item);
+  if (isGearArmor(item)) {
+    if (quality === "normal") return "";
+    if (quality === "low") return "−10 ко всем Тестам Ловкости";
+    if (quality === "good") return "+1 Броня против первой атаки в Раунде";
+    return "+1 Броня · вес уменьшен вдвое";
+  }
+  if (!isGearWeapon(item)) return "";
+  if (gearWeaponKind(item) === "melee") {
+    if (quality === "normal") return "";
+    if (quality === "low") return "−10 к попаданию";
+    if (quality === "good") return "+5 к попаданию";
+    return "+10 к попаданию · +1 к Урону";
+  }
+  const traits = `${item.type || ""} ${item.stats || ""}`;
+  const unreliable = /ненад[её]жн/i.test(traits);
+  const reliable = /над[её]жн/i.test(traits.replace(/ненад[её]жн/ig, ""));
+  if (quality === "normal") {
+    if (unreliable && reliable) return "«Ненадёжное» и «Надёжное» взаимно нейтрализуются";
+    if (unreliable) return "«Ненадёжное»: клин на 91+ (в т. ч. длинная очередь и беглый огонь)";
+    if (reliable) return "«Надёжное»: клин только на 10 из 1d10, иначе промах";
+    return "";
+  }
+  if (quality === "low") {
+    if (unreliable) return "Уже «Ненадёжное»: клинит при каждом промахе";
+    if (reliable) return "«Ненадёжное» + «Надёжное»: взаимно нейтрализуются";
+    return "«Ненадёжное»: клин на 91+ (в т. ч. длинная очередь и беглый огонь)";
+  }
+  if (quality === "good") {
+    if (unreliable) return "«Надёжное» + «Ненадёжное»: взаимно нейтрализуются";
+    if (reliable) return "«Надёжное» уже есть (без доп. эффекта): клин только на 10 из 1d10";
+    return "«Надёжное»: при клине 1d10; только 10 — клин, иначе промах";
+  }
+  return "Клин/перегрев: считается обычным промахом";
+}
+
+function gearQualityControl(item) {
+  if (!isGearWeapon(item) && !isGearArmor(item)) return null;
+  const wrap = document.createElement("div"); wrap.className = "gear-quality-control";
+  const select = document.createElement("select"); select.setAttribute("aria-label", `Качество: ${item.name}`);
+  const lowQualityLabel = isGearArmor(item) ? "Низкое" : "Плохое";
+  for (const [value, text] of [["low", lowQualityLabel], ["normal", "Обычное"], ["good", "Хорошее"], ["best", "Высшее"]]) {
+    const option = document.createElement("option"); option.value = value; option.textContent = text; select.appendChild(option);
+  }
+  select.value = gearQuality(item);
+  const index = gearItems.indexOf(item);
+  select.addEventListener("change", () => updateGearQuality(index, select.value));
+  wrap.appendChild(select);
+  const effect = gearQualityEffect(item);
+  if (effect) {
+    const note = document.createElement("span"); note.className = "gear-quality-effect"; note.textContent = effect;
+    wrap.appendChild(note);
+  }
+  return wrap;
+}
+
+function gearTypeWithWeaponFeatures(item) {
+  const catalogItem = ARMORY_CATALOG.find(entry => entry.id === item.catalogId);
+  const type = String(item.type || catalogItem?.type || "").trim();
+  if (!isGearWeapon(item)) return type;
+  const featureEntry = String(item.stats || "").split("·").map(part => part.trim()).find(part => /^Особенности\s*:/i.test(part));
+  const features = featureEntry?.replace(/^Особенности\s*:\s*/i, "").trim();
+  if (!features || features === "---" || type.toLocaleLowerCase("ru").includes(features.toLocaleLowerCase("ru"))) return type;
+  return `${type}. ${features}.`;
+}
+
+function gearStatsWithoutWeaponFeatures(item, stats = item.stats) {
+  if (!isGearWeapon(item)) return String(stats || "");
+  return String(stats || "").split("·").map(part => part.trim()).filter(part => !/^Особенности\s*:/i.test(part)).join(" · ");
 }
 
 function armoryItemIcon(item) {
@@ -1770,13 +1921,33 @@ function gearEntryIcon(item) {
 }
 
 function gearDisplayStats(item) {
-  const catalogItem = ARMORY_CATALOG.find(entry => entry.id === item.catalogId);
-  const isWeapon = catalogItem?.category === "weapon" || /оруж/i.test(item.type || "") || /^(?:основное|пистолет|ближний бой|рукопашное)$/i.test(item.type || "");
+  const isWeapon = isGearWeapon(item);
+  const isArmor = isGearArmor(item);
+  const quality = gearQuality(item);
   const rarities = new Set(["Изобильная", "Обильная", "Распространённая", "Средняя", "Скудная", "Редкая", "Раритет", "Особая", "Индивидуальная"]);
-  return String(item.stats || "").split("·").map(part => part.trim()).filter(part =>
+  const parts = String(item.stats || "").split("·").map(part => part.trim()).filter(part =>
     part && !/^(?:Вес|Цена)(?:\s|$)/i.test(part) && !/^за\s+обойму[.!]?$/i.test(part) &&
-    !(isWeapon && /^Класс\s*:/i.test(part)) && !rarities.has(part)
-  ).join(" · ");
+    !(isWeapon && /^(?:Класс|Особенности)\s*:/i.test(part)) && !rarities.has(part)
+  );
+  if (isWeapon && quality === "best" && gearWeaponKind(item) === "melee") {
+    for (let i = 0; i < parts.length; i++) {
+      parts[i] = parts[i].replace(/(Урон\s*:\s*\d+d\d+\s*)([+-]\s*\d+)?/i, (match, dice, modifier = "") => {
+        const base = Number(modifier.replace(/\s/g, "")) || 0, adjusted = base + 1;
+        return `${dice}${adjusted >= 0 ? "+" : ""}${adjusted}`;
+      });
+    }
+  }
+  if (isArmor && quality === "best") {
+    for (let i = 0; i < parts.length; i++)
+      parts[i] = parts[i].replace(/((?:Броня|Бр)\s*:?\s*)(\d+)/i, (_, label, value) => `${label}${Number(value) + 1}`);
+    const weightPart = String(item.stats || "").split("·").map(part => part.trim()).find(part => /^Вес\s+/i.test(part));
+    const weightMatch = weightPart?.match(/^Вес\s+([\d.,]+)\s*(.*)$/i);
+    if (weightMatch) {
+      const weight = Number(weightMatch[1].replace(",", ".")) / 2;
+      parts.push(`Вес ${String(weight).replace(".", ",")}${weightMatch[2] ? ` ${weightMatch[2]}` : ""} (½)`);
+    }
+  }
+  return parts.join(" · ");
 }
 
 function renderArsenalCatalog() {
@@ -1870,11 +2041,11 @@ function renderArsenalCart() {
 function commitArsenalCart() {
   if (!arsenalCart.size) return;
   for (const {item, qty} of arsenalCart.values()) {
-    const existing = gearItems.find(row => row.catalogId === item.id);
+    const existing = gearItems.find(row => row.catalogId === item.id && gearQuality(row) === "normal");
     if (existing) existing.qty = Math.max(1, num(existing.qty) || 1) + qty;
     else gearItems.push({
-      catalogId: item.id, name: item.name, type: item.type,
-      stats: [formatArmoryStats(item.stats), item.weight && `Вес ${item.weight}`, item.price == null ? item.priceLabel || "Цена не указана" : `Цена ${item.price} Тр.`, item.availability, item.unit].filter(Boolean).join(" · "),
+      catalogId: item.id, name: item.name, type: gearTypeWithWeaponFeatures(item),
+      stats: [formatArmoryStats(gearStatsWithoutWeaponFeatures(item)), item.weight && `Вес ${item.weight}`, item.price == null ? item.priceLabel || "Цена не указана" : `Цена ${item.price} Тр.`, item.availability, item.unit].filter(Boolean).join(" · "),
       qty, price: item.price, availability: item.availability, sourcePage: item.sourcePage,
     });
   }
@@ -1895,9 +2066,11 @@ function renderGear() {
     const icon = document.createElement("div"); icon.className = "gear-entry-icon"; icon.textContent = gearEntryIcon(item);
     const info = document.createElement("div"); info.className = "gear-entry-info";
     const name = document.createElement("b"), type = document.createElement("small"), stats = document.createElement("span");
-    name.textContent = item.name; type.textContent = item.type || "Предмет"; stats.textContent = gearDisplayStats(item);
+    name.textContent = item.name; type.textContent = gearTypeWithWeaponFeatures(item) || "Предмет"; stats.textContent = gearDisplayStats(item);
     info.append(name, type);
     if (stats.textContent) info.appendChild(stats);
+    const qualityControl = gearQualityControl(item);
+    if (qualityControl) info.appendChild(qualityControl);
     const controls = document.createElement("div"); controls.className = "gear-entry-controls";
     const previewQtyInput = document.createElement("input");
     previewQtyInput.className = "gear-entry-quantity"; previewQtyInput.type = "number"; previewQtyInput.min = "1"; previewQtyInput.step = "1"; previewQtyInput.value = String(quantity);
@@ -1930,9 +2103,14 @@ function renderGear() {
     const tr = document.createElement("tr");
     for (const key of ["name", "type", "stats"]) {
       const td = document.createElement("td"), input = document.createElement("input");
-      input.className = "gear-edit-input"; input.value = item[key] || ""; input.setAttribute("aria-label", key);
+      input.className = "gear-edit-input"; input.value = key === "type" ? gearTypeWithWeaponFeatures(item) : item[key] || ""; input.setAttribute("aria-label", key);
       input.addEventListener("change", () => { gearItems[index][key] = input.value.trim(); sheetDirty = true; flashSave(); renderGear(); });
-      td.appendChild(input); tr.appendChild(td);
+      td.appendChild(input);
+      if (key === "stats") {
+        const inventoryQuality = gearQualityControl(item);
+        if (inventoryQuality) td.appendChild(inventoryQuality);
+      }
+      tr.appendChild(td);
     }
     const qtyCell = document.createElement("td"), qtyInput = document.createElement("input");
     qtyInput.className = "gear-qty-input"; qtyInput.type = "number"; qtyInput.min = "1"; qtyInput.step = "1"; qtyInput.value = String(quantity); qtyInput.setAttribute("aria-label", `Количество: ${item.name}`);
@@ -2241,6 +2419,10 @@ async function init() {
       $(`input[data-key="base_${statKey}"]`).value = event.target.value;
       sheetDirty = true; recalc(); flashSave();
       return;
+    }
+    if (event.target.matches(".armor-zone input") && event.target.value !== "") {
+      const armorValue = Number(event.target.value);
+      if (!Number.isFinite(armorValue) || armorValue < 0) event.target.value = "0";
     }
     if (!event.target.matches("[data-key]")) return;
     sheetDirty = true; recalc(); flashSave();

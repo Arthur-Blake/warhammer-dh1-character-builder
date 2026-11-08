@@ -31,7 +31,7 @@ PROJECT_DIR = os.path.dirname(os.path.abspath(__file__)) or "."
 DB_PATH = os.path.join(PROJECT_DIR, "characters.sqlite3")
 REFERENCE_SEED_PATH = os.path.join(PROJECT_DIR, "reference_seed.json")
 # Increment this when changing the seed; only reference tables are reseeded.
-REFERENCE_DATA_VERSION = 3
+REFERENCE_DATA_VERSION = 4
 SESSION_COOKIE = "dh1_session"
 SESSION_DAYS = 30
 PASSWORD_MIN = 4
