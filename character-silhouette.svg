@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 900" role="img" aria-labelledby="title desc">
+  <title id="title">Силуэт персонажа Dark Heresy</title>
+  <desc id="desc">Фронтальный силуэт человека в длинном готическом плаще и лёгкой броне.</desc>
+  <defs>
+    <linearGradient id="coat" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#30291e"/>
+      <stop offset=".48" stop-color="#1b1915"/>
+      <stop offset="1" stop-color="#100f0d"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="0" x2="1">
+      <stop stop-color="#68502d"/>
+      <stop offset=".5" stop-color="#b18b4c"/>
+      <stop offset="1" stop-color="#554127"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Arms and legs sit behind the coat. -->
+  <g fill="url(#coat)" stroke="#705832" stroke-width="3" stroke-linejoin="round">
+    <path d="M145 191 Q123 195 107 218 L79 273 47 359 Q42 373 51 385 L63 397 Q69 401 75 394 L94 368 127 301 153 260Z"/>
+    <path d="M255 191 Q277 195 293 218 L321 273 353 359 Q358 373 349 385 L337 397 Q331 401 325 394 L306 368 273 301 247 260Z"/>
+    <path d="M151 628 L139 765 137 818 Q136 833 149 838 L178 841 Q190 839 188 827 L188 781 207 662Z"/>
+    <path d="M249 628 L261 765 263 818 Q264 833 251 838 L222 841 Q210 839 212 827 L212 781 193 662Z"/>
+  </g>
+
+  <!-- Boots -->
+  <g fill="#12110e" stroke="#80643a" stroke-width="3" stroke-linejoin="round">
+    <path d="M140 808 Q151 812 177 807 L188 826 193 852 Q194 861 185 864 L121 864 Q113 861 119 852 L137 834Z"/>
+    <path d="M260 808 Q249 812 223 807 L212 826 207 852 Q206 861 215 864 L279 864 Q287 861 281 852 L263 834Z"/>
+  </g>
+  <g fill="none" stroke="#493a25" stroke-width="2">
+    <path d="M127 851h58M215 851h58M141 827l37 4M259 827l-37 4"/>
+  </g>
+
+  <!-- Long field coat, broad shoulders and split tails. -->
+  <path d="M160 170 L140 183 Q119 191 103 215 L122 249 137 235 126 300 112 422 102 598 Q99 642 79 681 Q75 691 87 696 L169 682 200 654 231 682 313 696 Q325 691 321 681 301 642 298 598 L288 422 274 300 263 235 278 249 297 215 Q281 191 260 183 L240 170Z"
+        fill="url(#coat)" stroke="#80643a" stroke-width="4" stroke-linejoin="round"/>
+
+  <!-- Head and high collar. -->
+  <path d="M158 154 L145 187 169 215 200 228 231 215 255 187 242 154Z" fill="#181611" stroke="#705832" stroke-width="3"/>
+  <path d="M157 88 Q158 49 200 45 Q242 49 243 88 L238 142 Q231 166 200 171 Q169 166 162 142Z" fill="#171510" stroke="#9a7740" stroke-width="4"/>
+  <path d="M157 95 Q158 52 200 45 Q242 52 243 95 L231 83 219 72 200 79 181 72 169 83Z" fill="#262116" stroke="#705832" stroke-width="3"/>
+  <path d="M174 112 Q200 105 226 112 L222 142 Q216 157 200 160 184 157 178 142Z" fill="#0c0b09"/>
+  <path d="M181 115h13M206 115h13" stroke="#947342" stroke-width="3" stroke-linecap="round"/>
+  <path d="M200 118v24m-8 8h16" fill="none" stroke="#554127" stroke-width="2"/>
+
+  <!-- Coat lapels and restrained armor plates. -->
+  <path d="M161 179 L190 214 177 277 145 244Z M239 179 L210 214 223 277 255 244Z" fill="#242017" stroke="#967541" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M190 211 L200 221 210 211 218 282 200 296 182 282Z" fill="#302719" stroke="#a08045" stroke-width="3"/>
+  <path d="M148 261 Q200 246 252 261 L264 344 Q200 367 136 344Z" fill="#211d16" stroke="#705832" stroke-width="3"/>
+  <path d="M161 276 Q200 265 239 276 L244 328 Q200 344 156 328Z" fill="#191712" stroke="#59462b" stroke-width="2"/>
+  <path d="M200 275v57M166 297h25m18 0h25" stroke="#7c6035" stroke-width="2"/>
+
+  <!-- Belt, clasp and coat details. -->
+  <path d="M125 405 Q200 421 275 405 L278 430 Q200 449 122 430Z" fill="#100f0d" stroke="#8b6b38" stroke-width="3"/>
+  <path d="M187 407h26v31h-26z" fill="#302719" stroke="url(#metal)" stroke-width="3"/>
+  <path d="M200 413l6 9-6 9-6-9Z" fill="#ad8847"/>
+  <path d="M139 451 L129 594 Q128 630 112 669 M261 451 L271 594 Q272 630 288 669" fill="none" stroke="#574329" stroke-width="3"/>
+  <path d="M200 450v202M154 469l-4 90m96-90 4 90" fill="none" stroke="#403421" stroke-width="2"/>
+  <path d="M133 479h16m-18 17h16m120-17h-16m18 17h-16" stroke="#947342" stroke-width="2"/>
+
+  <!-- Cuffs and subtle engraved marks. -->
+  <path d="M51 365l25 12m248-12-25 12" stroke="#a08045" stroke-width="4"/>
+  <path d="M200 303l4 7-4 7-4-7Z M200 317l4 7-4 7-4-7Z" fill="#b18b4c"/>
+  <path d="M183 686l17-13 17 13" fill="none" stroke="#8a6b3b" stroke-width="3"/>
+</svg>

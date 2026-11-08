@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Превью · качество снаряжения</title>
+  <style>
+    :root{color-scheme:dark;--bg:#100f0d;--panel:#191713;--panel2:#211c16;--line:#393229;--gold:#d7bd7d;--muted:#9b907d;--text:#e9e0cf;--serif:Georgia,"Times New Roman",serif;--sans:Arial,"Segoe UI",sans-serif}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#282117 0,#100f0d 58%);color:var(--text);font:13px/1.5 var(--sans)}
+    .page{width:min(100% - 32px,1020px);margin:44px auto 70px}.eyebrow{color:#9b8254;font-size:10px;letter-spacing:1.7px;text-transform:uppercase}.title-row{display:flex;align-items:end;justify-content:space-between;gap:20px;padding-bottom:15px;border-bottom:1px solid #51432e}.title-row h1{margin:5px 0 0;color:#ead9b2;font:small-caps 25px var(--serif);letter-spacing:1.1px}.title-row p{margin:0;color:var(--muted);font-size:11px}
+    .equipment{margin-top:18px;padding:17px;border:1px solid #40372a;background:linear-gradient(145deg,#1d1a15,#141310);box-shadow:0 12px 34px #0007}.section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:13px}.section-head h2{margin:0;color:#e6ce97;font:small-caps 16px var(--serif);letter-spacing:.7px}.section-head span{color:#8e826c;font-size:9px;letter-spacing:1px;text-transform:uppercase}
+    .items{display:grid;gap:7px}.item{display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:start;gap:10px;padding:10px;border:1px solid var(--line);background:linear-gradient(110deg,#201c16,#171511)}.icon{display:grid;place-items:center;width:30px;height:30px;border:1px solid #51432e;background:#241f17;color:#d3b66f;font-size:15px}.info{min-width:0;display:grid;gap:3px}.name{color:#e7d8b7;font:600 13px var(--serif)}.type{color:#b89a5e;font-size:9px}.stats{color:#9b907d;font-size:10px;line-height:1.45}.quality{display:grid;grid-template-columns:minmax(100px,120px) minmax(0,1fr);align-items:center;gap:4px 8px;margin-top:4px;color:#9e927c;font-size:9px}.quality select{width:100%;min-width:0;padding:4px 7px;border:1px solid #51432e;border-radius:2px;background:#201c16;color:#e9e0cf;font:10px var(--sans)}.quality select:focus{outline:1px solid #b99455;outline-offset:1px}.effect{grid-column:2;grid-row:1;color:#d6bd80;font-size:9px;line-height:1.35;overflow-wrap:anywhere}.quantity{align-self:center;padding:5px 8px;border:1px solid #51432e;color:#bca779;font-size:10px}.note{margin:13px 0 0;padding:9px 11px;border-left:2px solid #80643a;background:#201b13;color:#aa9b80;font-size:10px}.note b{color:#d7bd7d;font-weight:500}
+    @media(max-width:560px){.page{width:min(100% - 20px,1020px);margin:24px auto}.title-row{align-items:flex-start;flex-direction:column;gap:5px}.title-row h1{font-size:21px}.equipment{padding:11px}.item{grid-template-columns:26px minmax(0,1fr) auto;gap:7px;padding:8px}.icon{width:26px;height:26px}.quality{grid-template-columns:minmax(90px,105px) minmax(0,1fr);gap:4px 6px}.quantity{padding:4px 5px;font-size:9px}}
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="eyebrow">Лист персонажа / превью интерфейса</div>
+    <header class="title-row"><div><h1>Качество снаряжения</h1></div><p>Компактный выбор прямо в строке предмета</p></header>
+    <section class="equipment" aria-label="Снаряжение персонажа">
+      <div class="section-head"><h2>Снаряжение</h2><span>3 предмета</span></div>
+      <div class="items">
+        <article class="item" data-kind="ranged" data-base="Дальность 100 м · Скорострельность О/3/- · Урон 1d10+3 Э · Обойма 60" data-traits="">
+          <div class="icon" aria-hidden="true">➤</div><div class="info"><b class="name">Лазган M36</b><small class="type">Основное оружие · лазерное</small><span class="stats">Дальность 100 м · Скорострельность О/3/- · Урон 1d10+3 Э · Обойма 60</span>
+            <label class="quality"><select aria-label="Качество: Лазган M36"><option value="low">Плохое</option><option value="normal">Обычное</option><option value="good" selected>Хорошее</option><option value="best">Высшее</option></select><span class="effect"></span></label>
+          </div><span class="quantity">×1</span>
+        </article>
+        <article class="item" data-kind="melee" data-base="Урон 1d10+2 Р · Бронебойность 2 · Вес 6 кг" data-traits="">
+          <div class="icon" aria-hidden="true">⚔</div><div class="info"><b class="name">Цепной меч</b><small class="type">Оружие ближнего боя · цепное</small><span class="stats">Урон 1d10+3 Р · Бронебойность 2 · Вес 6 кг</span>
+            <label class="quality"><select aria-label="Качество: Цепной меч"><option value="low">Плохое</option><option value="normal">Обычное</option><option value="good">Хорошее</option><option value="best" selected>Высшее</option></select><span class="effect"></span></label>
+          </div><span class="quantity">×1</span>
+        </article>
+        <article class="item" data-kind="armor" data-armor="3" data-weight="5" data-unit="кг">
+          <div class="icon" aria-hidden="true">⛨</div><div class="info"><b class="name">Флак-жилет</b><small class="type">Броня · защита торса</small><span class="stats">Броня 3 · Вес 5 кг</span>
+            <label class="quality"><select aria-label="Качество: Флак-жилет"><option value="low">Низкое</option><option value="normal">Обычное</option><option value="good" selected>Хорошее</option><option value="best">Высшее</option></select><span class="effect"></span></label>
+          </div><span class="quantity">×1</span>
+        </article>
+      </div>
+      <p class="note"><b>Новый предмет — обычного качества.</b> Справа от селектора — эффект выбранного качества; числовые характеристики меняются в той же строке. Попробуйте переключить варианты.</p>
+    </section>
+  </main>
+  <script>
+    function update(item){
+      const quality=item.querySelector("select").value,effect=item.querySelector(".effect"),stats=item.querySelector(".stats");
+      if(item.dataset.kind==="armor"){
+        const armor=Number(item.dataset.armor),weight=Number(item.dataset.weight);
+        stats.textContent=`Броня ${armor+(quality==="best"?1:0)} · Вес ${quality==="best"?weight/2:weight} ${item.dataset.unit}${quality==="best"?" (½)":""}`;
+        effect.textContent=quality==="low"?"−10 ко всем Тестам Ловкости":quality==="good"?"+1 Броня против первой атаки в Раунде":quality==="best"?"+1 Броня · вес уменьшен вдвое":"";
+      }else{
+        const base=item.dataset.base;
+        stats.textContent=item.dataset.kind==="melee"&&quality==="best"?base.replace(/(Урон\s+\d+d\d+)([+-]\d+)/,(_,dice,modifier)=>`${dice}+${Number(modifier.slice(1))+1}`):base;
+        if(item.dataset.kind==="melee")effect.textContent=quality==="low"?"−10 к попаданию":quality==="good"?"+5 к попаданию":quality==="best"?"+10 к попаданию · +1 к Урону":"";
+        else effect.textContent=quality==="low"?"«Ненадёжное»: клин на 91+ (в т. ч. длинная очередь и беглый огонь)":quality==="good"?"«Надёжное»: при клине 1d10; только 10 — клин, иначе промах":quality==="best"?"Клин/перегрев: считается обычным промахом":"";
+      }
+    }
+    document.querySelectorAll(".item").forEach(item=>{item.querySelector("select").addEventListener("change",()=>update(item));update(item)});
+  </script>
+</body>
+</html>

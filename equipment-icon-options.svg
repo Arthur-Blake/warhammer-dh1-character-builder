@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700" role="img" aria-labelledby="title">
+<title id="title">Варианты иконок снаряжения</title>
+<defs>
+ <linearGradient id="bg" x2="0" y2="1"><stop stop-color="#211d17"/><stop offset="1" stop-color="#141310"/></linearGradient>
+ <symbol id="rifle" viewBox="0 0 100 100"><path d="M8 43h12l8-8h42l9 5h13v8H78l-8 7H49l-4 15h-9l2-16-14-2-4 8h-7l3-13H8zm22-8v-5h36m15 8v-7h8M49 55l3 15h-8l-4-15m-4-9v7m9-7v7m9-7v7"/></symbol>
+ <symbol id="blade" viewBox="0 0 100 100"><path d="M50 12 65 50 57 57H43L35 50zM50 22v29M30 55q20 12 40 0l-3 9q-17 9-34 0zM50 64v17m-5-11h10m-10 6h10M50 81a5 5 0 1 0 0 10 5 5 0 1 0 0-10z"/></symbol>
+ <symbol id="vest" viewBox="0 0 100 100"><path d="M50 17 80 29v20c0 20-12 31-30 39-18-8-30-19-30-39V29z"/><path d="M50 24 73 33v16c0 15-8 24-23 32-15-8-23-17-23-32V33zM50 36v27m-10-13h20"/></symbol>
+ <symbol id="medkit" viewBox="0 0 100 100"><path d="M19 38h62v43H19zm15 0V27h32v11m-20 10h8v9h9v8h-9v9h-8v-9h-9v-8h9z"/></symbol>
+ <symbol id="ammo" viewBox="0 0 100 100"><path d="M25 73V43l7-15h16l7 15v30zm32 0V43l7-15h16l7 15v30zM25 48h30m2 0h30M25 64h30m2 0h30M32 28l8-8 8 8m16 0 8-8 8 8"/></symbol>
+</defs>
+<style>
+text{font-family:Arial,sans-serif}.title{fill:#ead29b;font-size:25px;letter-spacing:1px}.sub{fill:#918674;font-size:11px;letter-spacing:1px}.head{fill:#dec68d;font-size:14px;letter-spacing:1px}.num{fill:#79623b;font-size:10px}.label{fill:#a99b83;font-size:12px}.rule{stroke:#59472d;stroke-width:1}.tile{fill:#201c16;stroke:#51432e}.line{fill:none;stroke:#d3b66f;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.etch{fill:none;stroke:#d3b66f;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}.hatch{fill:none;stroke:#957544;stroke-width:1.2}.bold{fill:none;stroke:#e0c47e;stroke-width:6;stroke-linecap:square;stroke-linejoin:miter}.medal{fill:#44341f;stroke:#927344;stroke-width:1.2}
+</style>
+<rect width="1000" height="700" fill="url(#bg)"/><rect x="20" y="20" width="960" height="660" fill="none" stroke="#54442d"/>
+<text x="48" y="58" class="title">АРСЕНАЛ · ИКОНКИ СНАРЯЖЕНИЯ</text><text x="950" y="58" text-anchor="end" class="sub">ЛИСТ КОНЦЕПТОВ / 01</text><path d="M48 78h904" class="rule"/>
+<text x="340" y="111" text-anchor="middle" class="num">ВАРИАНТ A</text><text x="340" y="133" text-anchor="middle" class="head">ЧИСТАЯ ЛИНИЯ</text>
+<text x="620" y="111" text-anchor="middle" class="num">ВАРИАНТ B</text><text x="620" y="133" text-anchor="middle" class="head">ПОЛЕВАЯ ГРАВЮРА</text>
+<text x="860" y="111" text-anchor="middle" class="num">ВАРИАНТ C</text><text x="860" y="133" text-anchor="middle" class="head">ШТАМПОВАННЫЙ ЗНАК</text>
+<g class="label"><text x="48" y="193">01 · ДИСТАНЦИОННОЕ</text><text x="48" y="293">02 · БЛИЖНИЙ БОЙ</text><text x="48" y="393">03 · ЗАЩИТА</text><text x="48" y="493">04 · МЕДИЦИНА</text><text x="48" y="593">05 · БОЕПРИПАСЫ</text></g>
+<!-- tiles -->
+<g><rect class="tile" x="315" y="155" width="50" height="50"/><rect class="tile" x="595" y="155" width="50" height="50"/><rect class="tile" x="835" y="155" width="50" height="50"/>
+<rect class="tile" x="315" y="255" width="50" height="50"/><rect class="tile" x="595" y="255" width="50" height="50"/><rect class="tile" x="835" y="255" width="50" height="50"/>
+<rect class="tile" x="315" y="355" width="50" height="50"/><rect class="tile" x="595" y="355" width="50" height="50"/><rect class="tile" x="835" y="355" width="50" height="50"/>
+<rect class="tile" x="315" y="455" width="50" height="50"/><rect class="tile" x="595" y="455" width="50" height="50"/><rect class="tile" x="835" y="455" width="50" height="50"/>
+<rect class="tile" x="315" y="555" width="50" height="50"/><rect class="tile" x="595" y="555" width="50" height="50"/><rect class="tile" x="835" y="555" width="50" height="50"/></g>
+<g class="line"><use href="#rifle" x="315" y="155" width="50" height="50"/><use href="#blade" x="315" y="255" width="50" height="50"/><use href="#vest" x="315" y="355" width="50" height="50"/><use href="#medkit" x="315" y="455" width="50" height="50"/><use href="#ammo" x="315" y="555" width="50" height="50"/></g>
+<g class="etch"><use href="#rifle" x="595" y="155" width="50" height="50"/><use href="#blade" x="595" y="255" width="50" height="50"/><use href="#vest" x="595" y="355" width="50" height="50"/><use href="#medkit" x="595" y="455" width="50" height="50"/><use href="#ammo" x="595" y="555" width="50" height="50"/></g>
+<g class="hatch"><path d="m634 170 5 5m-5 0 5-5m-5 95 5 5m-5 0 5-5m-5 95 5 5m-5 0 5-5m-5 95 5 5m-5 0 5-5m-5 95 5 5m-5 0 5-5"/></g>
+<g><circle class="medal" cx="860" cy="180" r="21"/><circle class="medal" cx="860" cy="280" r="21"/><circle class="medal" cx="860" cy="380" r="21"/><circle class="medal" cx="860" cy="480" r="21"/><circle class="medal" cx="860" cy="580" r="21"/></g>
+<g class="bold"><use href="#rifle" x="835" y="155" width="50" height="50"/><use href="#blade" x="835" y="255" width="50" height="50"/><use href="#vest" x="835" y="355" width="50" height="50"/><use href="#medkit" x="835" y="455" width="50" height="50"/><use href="#ammo" x="835" y="555" width="50" height="50"/></g>
+<path d="M48 635h904" class="rule"/><text x="48" y="657" class="sub">ГРАФИТ · СТАРАЯ ЛАТУНЬ · ЧИТАЕМОСТЬ В 24–30 PX</text><text x="952" y="657" text-anchor="end" class="sub">КОНЦЕПТ · НЕ ПОДКЛЮЧЕНО</text>
+</svg>

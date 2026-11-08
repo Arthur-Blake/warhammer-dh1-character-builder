@@ -1894,30 +1894,45 @@ function gearStatsWithoutWeaponFeatures(item, stats = item.stats) {
 }
 
 function armoryItemIcon(item) {
-  if (item.category === "armor") return "⛨";
+  if (item.category === "armor") return "shield";
   if (item.category === "weapon") {
     const type = `${item.type || ""} ${item.kind || ""}`.toLocaleLowerCase("ru");
-    if (/пистолет/.test(type)) return "⌖";
-    if (/метатель|лук|арбалет|throw/.test(type)) return "➶";
-    if (/ranged|дистанц|основное/.test(type)) return "➤";
-    return "⚔";
+    if (/пистолет/.test(type)) return "pistol";
+    if (/метатель|лук|арбалет|throw/.test(type)) return "bow";
+    if (/ближн|рукопаш|melee|цепн/.test(type)) return "sword";
+    if (/ranged|дистанц|основное/.test(type)) return "rifle";
+    return "sword";
   }
-  if (item.category === "service") return "⌂";
-  if (item.category === "ammo") return "▣";
-  return "✦";
+  if (/аптеч|медицин|медикам|перевяз|хирург/.test(`${item.name || ""} ${item.type || ""}`.toLocaleLowerCase("ru"))) return "medkit";
+  if (item.category === "service") return "service";
+  if (item.category === "ammo") return "ammo";
+  return "fieldpack";
 }
 
 function gearEntryIcon(item) {
   const catalogItem = ARMORY_CATALOG.find(entry => entry.id === item.catalogId);
   if (catalogItem) return armoryItemIcon(catalogItem);
-  const type = String(item.type || "").toLocaleLowerCase("ru");
-  if (/брон/.test(type)) return "⛨";
-  if (/пистолет/.test(type)) return "⌖";
-  if (/метатель|лук|арбалет/.test(type)) return "➶";
-  if (/оруж|ближн|рукопаш/.test(type)) return "⚔";
-  if (/боеприпас|патрон|заряд/.test(type)) return "▣";
-  if (/услуг/.test(type)) return "⌂";
-  return "✦";
+  const type = `${item.name || ""} ${item.type || ""}`.toLocaleLowerCase("ru");
+  if (/брон|защит/.test(type)) return "shield";
+  if (/аптеч|медицин|медикам|перевяз|хирург/.test(type)) return "medkit";
+  if (/пистолет/.test(type)) return "pistol";
+  if (/метатель|лук|арбалет/.test(type)) return "bow";
+  if (/дистанц|стрелков/.test(type)) return "rifle";
+  if (/оруж|ближн|рукопаш|меч/.test(type)) return "sword";
+  if (/боеприпас|патрон|заряд/.test(type)) return "ammo";
+  if (/услуг/.test(type)) return "service";
+  return "fieldpack";
+}
+
+function setEquipmentIcon(element, iconName) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 100 100");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `#gear-icon-${iconName}`);
+  svg.appendChild(use);
+  element.replaceChildren(svg);
 }
 
 function gearDisplayStats(item) {
@@ -1963,7 +1978,7 @@ function renderArsenalCatalog() {
   const marketNames = {general:"Общий рынок",feral:"Дикие / феодальные",hive:"Миры-ульи",forge:"Миры-кузницы",frontier:"Миры-фронтиры",void:"Пустота",warzone:"Зона боевых действий",ordos:"Святые Ордосы"};
   for (const item of visible) {
     const card = document.createElement("article"); card.className = "arsenal-item";
-    const icon = document.createElement("div"); icon.className = "arsenal-item-icon"; icon.textContent = armoryItemIcon(item);
+    const icon = document.createElement("div"); icon.className = "arsenal-item-icon"; setEquipmentIcon(icon, armoryItemIcon(item));
     const main = document.createElement("div"); main.className = "arsenal-item-main";
     const title = document.createElement("div"); title.className = "arsenal-item-title";
     const name = document.createElement("b"); name.textContent = item.name;
@@ -2063,7 +2078,7 @@ function renderGear() {
     const dragHandle = document.createElement("span"); dragHandle.className = "gear-entry-drag"; dragHandle.textContent = "⠿";
     dragHandle.draggable = true;
     dragHandle.setAttribute("role", "img"); dragHandle.setAttribute("aria-label", `Перетащить ${item.name}`); dragHandle.title = "Перетащить, чтобы изменить порядок";
-    const icon = document.createElement("div"); icon.className = "gear-entry-icon"; icon.textContent = gearEntryIcon(item);
+    const icon = document.createElement("div"); icon.className = "gear-entry-icon"; setEquipmentIcon(icon, gearEntryIcon(item));
     const info = document.createElement("div"); info.className = "gear-entry-info";
     const name = document.createElement("b"), type = document.createElement("small"), stats = document.createElement("span");
     name.textContent = item.name; type.textContent = gearTypeWithWeaponFeatures(item) || "Предмет"; stats.textContent = gearDisplayStats(item);
@@ -2131,7 +2146,18 @@ function setGearMode(managing) {
   $("#gear-overview").hidden = managing;
   $("#gear-management").hidden = !managing;
   $("#secondary-grid").classList.toggle("managing", managing);
-  if (managing) { renderGear(); renderArsenalCatalog(); renderArsenalCart(); }
+  if (managing) {
+    renderGear(); renderArsenalCatalog(); renderArsenalCart();
+    requestAnimationFrame(() => {
+      const panel = $("#gear-management");
+      window.scrollTo({ top: window.scrollY + panel.getBoundingClientRect().top - 82, behavior: "smooth" });
+    });
+  } else {
+    requestAnimationFrame(() => {
+      const section = $("#secondary-grid");
+      window.scrollTo({ top: window.scrollY + section.getBoundingClientRect().top - 82, behavior: "smooth" });
+    });
+  }
 }
 
 function toggleStateEditor(force) {
