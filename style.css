@@ -305,8 +305,8 @@
 @media print{.gear-quality-control{display:none!important}}
 @media print{
   #app-shell .armor-figure{width:min(100%,280px)!important}
-  #app-shell .armor-zone{border:1px solid #111!important;background:#fff!important;color:#111!important;font-size:8pt!important}
-  #app-shell .armor-zone input{display:block!important;width:100%!important;height:9mm!important;border:1px solid #222!important;background:#fff!important;color:#111!important;font:bold 12pt/1.2 Arial,sans-serif!important}
+  #app-shell .armor-zone{z-index:5!important;opacity:1!important;padding:1mm!important;border:1.2pt solid #111!important;border-radius:0!important;background:#fff!important;color:#111!important;font-size:8pt!important}
+  #app-shell .armor-zone input{position:relative!important;z-index:1!important;display:block!important;width:100%!important;height:8mm!important;padding:0!important;border:1pt solid #111!important;border-radius:0!important;background:#fff!important;color:#111!important;font:bold 12pt/1.2 Arial,sans-serif!important;appearance:textfield}
   #app-shell .armor-zone input::placeholder{color:#555!important;opacity:1!important}
   #app-shell .layout>.main{display:grid!important;grid-template-columns:280px minmax(0,1fr)!important;grid-auto-flow:row dense!important;align-items:start!important;column-gap:3mm!important}
   #app-shell .layout>.main>*{grid-column:1/-1!important}
