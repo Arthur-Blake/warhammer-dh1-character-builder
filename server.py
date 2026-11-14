@@ -31,7 +31,7 @@ PROJECT_DIR = os.path.dirname(os.path.abspath(__file__)) or "."
 DB_PATH = os.path.join(PROJECT_DIR, "characters.sqlite3")
 REFERENCE_SEED_PATH = os.path.join(PROJECT_DIR, "reference_seed.json")
 # Increment this when changing the seed; only reference tables are reseeded.
-REFERENCE_DATA_VERSION = 4
+REFERENCE_DATA_VERSION = 7
 SESSION_COOKIE = "dh1_session"
 SESSION_DAYS = 30
 PASSWORD_MIN = 4
@@ -92,9 +92,11 @@ def create_reference_tables(conn):
         "CREATE TABLE IF NOT EXISTS careers (id TEXT PRIMARY KEY, position INTEGER NOT NULL, data TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS skill_list (position INTEGER PRIMARY KEY, data TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS skill_groups (name TEXT PRIMARY KEY, position INTEGER NOT NULL, data TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS common_skills (name TEXT PRIMARY KEY, position INTEGER NOT NULL)",
         "CREATE TABLE IF NOT EXISTS skill_texts (name TEXT PRIMARY KEY, position INTEGER NOT NULL, text TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS biographies (id TEXT PRIMARY KEY, position INTEGER NOT NULL, data TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS career_advancements (id TEXT PRIMARY KEY, career_id TEXT NOT NULL, rank_name TEXT NOT NULL, worlds TEXT NOT NULL, position INTEGER NOT NULL, data TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS characteristic_advancements (career_id TEXT PRIMARY KEY, position INTEGER NOT NULL, data TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS talents (name TEXT PRIMARY KEY, position INTEGER NOT NULL)",
         "CREATE TABLE IF NOT EXISTS sanctions (dice_range TEXT PRIMARY KEY, position INTEGER NOT NULL, effect TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS carry_table (position INTEGER PRIMARY KEY, value REAL NOT NULL)",
@@ -117,8 +119,8 @@ def seed_reference_tables(conn):
         seed = json.load(seed_file)
 
     for table in (
-        "worlds", "chars", "careers", "skill_list", "skill_groups", "skill_texts",
-        "biographies", "career_advancements", "talents", "sanctions", "carry_table", "talent_effects", "armory_catalog",
+        "worlds", "chars", "careers", "skill_list", "skill_groups", "common_skills", "skill_texts",
+        "biographies", "career_advancements", "characteristic_advancements", "talents", "sanctions", "carry_table", "talent_effects", "armory_catalog",
     ):
         conn.execute(f"DELETE FROM {table}")
 
@@ -144,6 +146,10 @@ def seed_reference_tables(conn):
         [(name, i, encode(items)) for i, (name, items) in enumerate(seed["skill_groups"].items())],
     )
     conn.executemany(
+        "INSERT INTO common_skills (name, position) VALUES (?, ?)",
+        [(name, i) for i, name in enumerate(seed["common_skills"])],
+    )
+    conn.executemany(
         "INSERT INTO skill_texts (name, position, text) VALUES (?, ?, ?)",
         [(name, i, text) for i, (name, text) in enumerate(seed["skill_texts"].items())],
     )
@@ -154,6 +160,10 @@ def seed_reference_tables(conn):
     conn.executemany(
         "INSERT INTO career_advancements (id, career_id, rank_name, worlds, position, data) VALUES (?, ?, ?, ?, ?, ?)",
         [(f"{item['career']}:{i}", item["career"], item["rank"], encode(item["worlds"]), i, encode(item)) for i, item in enumerate(seed["career_advancements"])],
+    )
+    conn.executemany(
+        "INSERT INTO characteristic_advancements (career_id, position, data) VALUES (?, ?, ?)",
+        [(item["career"], i, encode(item)) for i, item in enumerate(seed["characteristic_advancements"])],
     )
     conn.executemany(
         "INSERT INTO talents (name, position) VALUES (?, ?)",
@@ -193,9 +203,11 @@ def read_reference_tables(conn):
         "careers": [decode(row) for row in conn.execute("SELECT data FROM careers ORDER BY position")],
         "skill_list": [decode(row) for row in conn.execute("SELECT data FROM skill_list ORDER BY position")],
         "skill_groups": {row["name"]: json.loads(row["data"]) for row in conn.execute("SELECT name, data FROM skill_groups ORDER BY position")},
+        "common_skills": [row["name"] for row in conn.execute("SELECT name FROM common_skills ORDER BY position")],
         "skill_texts": {row["name"]: row["text"] for row in conn.execute("SELECT name, text FROM skill_texts ORDER BY position")},
         "biographies": [decode(row) for row in conn.execute("SELECT data FROM biographies ORDER BY position")],
         "career_advancements": [decode(row) for row in conn.execute("SELECT data FROM career_advancements ORDER BY position")],
+        "characteristic_advancements": [decode(row) for row in conn.execute("SELECT data FROM characteristic_advancements ORDER BY position")],
         "talents": [row["name"] for row in conn.execute("SELECT name FROM talents ORDER BY position")],
         "sanctions": {row["dice_range"]: row["effect"] for row in conn.execute("SELECT dice_range, effect FROM sanctions ORDER BY position")},
         "carry_table": [row["value"] for row in conn.execute("SELECT value FROM carry_table ORDER BY position")],

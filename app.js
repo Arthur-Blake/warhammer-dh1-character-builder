@@ -11,16 +11,21 @@ const num = v => parseInt(v, 10) || 0;
 let uidSeq = 0;
 let charEditMode = false;
 let skillHintsVisible = true;
+let talentHintsVisible = true;
 
 /* ---------- загружаемые справочники ---------- */
 let WORLDS = [];
 let CHARS = [];
 let CAREERS = [];
 let CAREER_ADVANCEMENTS = [];
+let CHARACTERISTIC_ADVANCEMENTS = [];
+let COMMON_SKILLS = new Set();
 let SKILL_LIST = [];
 let SKILL_GROUPS = {};
 let SKILL_TEXTS = {};
 let SKILLS = [];
+let SKILLS_BY_NAME = new Map();
+let SKILL_TEMPLATES_BY_NAME = new Map();
 let BIOGRAPHIES = [];
 let TALENTS = [];
 let SANCTIONS = {};
@@ -71,13 +76,29 @@ function charFixes(key) {
 /* Модификаторы, показываемые под результатом броска: мир, профессия и предыстория. */
 function fixBreakdown(key) {
   const w = curWorld();
-  if (!w) return "мир не выбран";
-  const parts = [`мир ${fmtMod(w.mods[key] || 0)}`];
-  for (const f of charFixes(key)) {
-    const source = f.bio ? f.src.replace(/^Биография:\s*/i, "") : f.src;
-    parts.push(`${fmtMod(f.v)} ${source}`);
+  const parts = w ? [`мир ${fmtMod(w.mods[key] || 0)}`] : ["мир не выбран"];
+  if (w) {
+    for (const f of charFixes(key)) {
+      const source = f.bio ? f.src.replace(/^Биография:\s*/i, "") : f.src;
+      parts.push(`${fmtMod(f.v)} ${source}`);
+    }
   }
-  return parts.join(" · ");
+  const specialModifier = num($(`input[data-key="statMod_${key}"]`)?.value);
+  if (specialModifier) parts.push(`мод ${fmtMod(specialModifier)}`);
+  const advancementBonus = characteristicAdvancementCount(key) * 5;
+  if (advancementBonus) parts.push(`${fmtMod(advancementBonus)} улучш.`);
+  return parts.join(" ");
+}
+
+function fixNumbers(key) {
+  const world = curWorld();
+  const parts = [fmtMod(world ? world.mods[key] || 0 : 0)];
+  for (const fix of charFixes(key)) parts.push(fmtMod(fix.v));
+  const specialModifier = num($(`input[data-key="statMod_${key}"]`)?.value);
+  if (specialModifier) parts.push(fmtMod(specialModifier));
+  const advancementBonus = characteristicAdvancementCount(key) * 5;
+  if (advancementBonus) parts.push(`${fmtMod(advancementBonus)} улучш.`);
+  return parts.join(" ");
 }
 
 function buildChars() {
@@ -90,8 +111,13 @@ function buildChars() {
     card.dataset.stat = c.key;
     card.innerHTML =
       `<label>${c.name}</label><strong id="val_${c.key}">—</strong>` +
-      `<input class="stat-edit-input" id="edit_${c.key}" data-stat-edit="${c.key}" type="number" inputmode="numeric" step="1" placeholder="—" aria-label="Базовое значение: ${c.name}" hidden>` +
-      `<small><span id="roll_${c.key}">—</span><span id="stat-separator_${c.key}"> · </span><span id="fix_${c.key}"></span></small>`;
+      `<input class="stat-edit-input" id="edit_${c.key}" data-stat-current="${c.key}" type="number" inputmode="numeric" step="1" placeholder="—" aria-label="Текущее значение: ${c.name}. Стрелками меняется мод, база не меняется" title="Стрелки меняют мод; база остаётся неизменной" hidden>` +
+      `<small><span id="roll_${c.key}">—</span><span id="stat-separator_${c.key}"> </span><span id="fix_${c.key}"></span></small>`;
+    const modifier = document.createElement("input");
+    modifier.type = "hidden";
+    modifier.dataset.key = `statMod_${c.key}`;
+    modifier.value = "0";
+    card.appendChild(modifier);
     root.appendChild(card);
     for (const prefix of ["base_", "adv_"]) {
       const input = document.createElement("input");
@@ -107,35 +133,118 @@ const fmtMod = m => (m >= 0 ? "+" : "") + m;
 function setCharEditMode(enabled) {
   charEditMode = enabled;
   const button = $("#btn-edit-chars");
-  const label = enabled ? "Показать характеристики с модификаторами" : "Редактировать базовые значения характеристик";
+  const label = enabled ? "Показать характеристики с модификаторами" : "Редактировать текущие значения характеристик";
   button.setAttribute("aria-pressed", String(enabled));
   button.setAttribute("aria-label", label);
   button.title = label;
-  $("#stats-kicker").textContent = enabled ? "База · без модификаторов" : "Итог · бонус";
+  $("#stats-kicker").textContent = "Итог · бонус";
 }
 
 function getVal(key) {
   const base = document.querySelector(`input[data-key="base_${key}"]`);
   const adv  = document.querySelector(`input[data-key="adv_${key}"]`);
-  return num(base && base.value) + num(adv && adv.value);
+  return num(base && base.value) + num(adv && adv.value) + characteristicAdvancementCount(key) * 5;
+}
+
+const CHARACTERISTIC_ADVANCEMENT_LEVELS = ["Простой", "Переходный", "Обученный", "Эксперт"];
+
+function readCharacteristicAdvancements() {
+  try {
+    const parsed = JSON.parse($("#characteristic-advancement-data")?.value || "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(CHARS.map(char => [char.key,
+      (Array.isArray(parsed[char.key]) ? parsed[char.key] : []).slice(0, 4)
+        .filter(entry => entry && typeof entry === "object" && Number.isFinite(Number(entry.cost)) && Number(entry.cost) >= 0)
+        .map(entry => ({ career: String(entry.career || ""), cost: Number(entry.cost) }))
+    ]));
+  } catch { return {}; }
+}
+
+function characteristicAdvancementCount(key) {
+  return readCharacteristicAdvancements()[key]?.length || 0;
+}
+
+function renderCharacteristicAdvancements() {
+  const tbody = $("#characteristic-advancement-rows");
+  if (!tbody) return;
+  const careerId = $("#sel-career").value;
+  const career = CAREERS.find(item => item.id === careerId);
+  const advancement = CHARACTERISTIC_ADVANCEMENTS.find(item => item.career === careerId);
+  const costs = advancement?.costs || {};
+  const levels = readCharacteristicAdvancements();
+  const availableXp = Math.max(0, num($("input[data-key=xpTotal]").value) - num($("input[data-key=xpSpent]").value) - bioCost());
+  $("#characteristic-advancement-career").textContent = career?.name || "—";
+  tbody.replaceChildren();
+
+  for (const char of CHARS) {
+    const entries = levels[char.key] || [];
+    const count = entries.length;
+    const costList = costs[char.key];
+    const nextCost = count < 4 && Array.isArray(costList) ? costList[count] : null;
+    const tr = document.createElement("tr");
+    const name = document.createElement("td"); name.textContent = char.name;
+    const cost = document.createElement("td");
+    cost.textContent = nextCost == null ? "—" : `${CHARACTERISTIC_ADVANCEMENT_LEVELS[count]} · ${nextCost}`;
+    const actions = document.createElement("td"); actions.className = "characteristic-advancement-actions";
+    const undo = document.createElement("button");
+    undo.type = "button"; undo.className = "characteristic-advancement-button"; undo.textContent = "−";
+    undo.dataset.characteristicAdvancement = char.key; undo.dataset.action = "undo";
+    undo.disabled = count === 0; undo.setAttribute("aria-label", `Отменить последнее улучшение: ${char.name}`);
+    const buy = document.createElement("button");
+    buy.type = "button"; buy.className = "characteristic-advancement-button"; buy.textContent = "+";
+    buy.dataset.characteristicAdvancement = char.key; buy.dataset.action = "buy";
+    buy.disabled = !advancement || nextCost == null || availableXp < nextCost;
+    buy.setAttribute("aria-label", `Купить улучшение характеристики: ${char.name}`);
+    actions.append(undo, buy);
+    tr.append(name, cost, actions);
+    tbody.appendChild(tr);
+  }
+}
+
+function changeCharacteristicAdvancement(key, action) {
+  const advancement = CHARACTERISTIC_ADVANCEMENTS.find(item => item.career === $("#sel-career").value);
+  const levels = readCharacteristicAdvancements();
+  const entries = levels[key] || [];
+  const xpSpentInput = $("input[data-key=xpSpent]");
+  if (action === "undo") {
+    const last = entries.pop();
+    if (!last) return;
+    xpSpentInput.value = String(Math.max(0, num(xpSpentInput.value) - last.cost));
+  } else {
+    const cost = advancement?.costs?.[key]?.[entries.length];
+    const available = Math.max(0, num($("input[data-key=xpTotal]").value) - num(xpSpentInput.value) - bioCost());
+    if (entries.length >= 4 || cost == null || cost > available) return;
+    entries.push({ career: advancement.career, cost });
+    xpSpentInput.value = String(num(xpSpentInput.value) + cost);
+  }
+  levels[key] = entries;
+  $("#characteristic-advancement-data").value = JSON.stringify(levels);
+  sheetDirty = true;
+  recalc();
+  flashSave();
 }
 
 /* ---------- пересчёт ---------- */
 function recalc() {
+  syncToughBodyWounds();
   const vals = {};
   const world = curWorld();
   for (const c of CHARS) {
     const baseValue = $("input[data-key='base_" + c.key + "']").value;
     const extra = charFixes(c.key).reduce((sum, f) => sum + f.v, 0);
-    const v = getVal(c.key) + (world ? world.mods[c.key] : 0) + extra;
+    const specialModifier = num($(`input[data-key="statMod_${c.key}"]`).value);
+    const v = getVal(c.key) + (world ? world.mods[c.key] : 0) + extra + specialModifier;
     vals[c.key] = v;
     $("#val_" + c.key).textContent = v || "—";
     $("#roll_" + c.key).textContent = baseValue || "—";
-    $("#fix_" + c.key).textContent = fixBreakdown(c.key);
+    $("#fix_" + c.key).textContent = charEditMode ? fixBreakdown(c.key) : fixNumbers(c.key);
     const card = $(`[data-stat="${c.key}"]`);
     const editInput = $("#edit_" + c.key);
-    if (editInput.value !== baseValue) editInput.value = baseValue;
+    const editValue = charEditMode ? v : baseValue;
+    if (editInput.value !== String(editValue)) editInput.value = editValue;
     editInput.hidden = !charEditMode;
+    card.classList.toggle("modifier-positive", specialModifier > 0);
+    card.classList.toggle("modifier-negative", specialModifier < 0);
     $("#val_" + c.key).hidden = charEditMode;
     $("#roll_" + c.key).hidden = charEditMode;
     $("#stat-separator_" + c.key).hidden = charEditMode;
@@ -155,6 +264,7 @@ function recalc() {
   renderState();
   renderGear();
   updateCareerAdvancementStatus();
+  renderCharacteristicAdvancements();
   if (sheetDirty && !isApplying) flashSave();   // чистый только что загруженный лист не отправляем
 }
 
@@ -168,6 +278,7 @@ function addSkillRow(name = "", lvl = "untrained", src = "manual", selectedChoic
   const sel = document.createElement("select");
   sel.dataset.key = "sk" + (++uidSeq);
   sel.className = "sk-name";
+  sel.disabled = src === "common";
   populateSkillSelect(sel, availableSkillGroups(), "", name, Boolean(name));
 
   const lvlSel = document.createElement("select");
@@ -178,6 +289,7 @@ function addSkillRow(name = "", lvl = "untrained", src = "manual", selectedChoic
     `<option value="untrained">Без обучения</option>` +
     `<option value="trained">Обучено +10</option>` +
     `<option value="mastery">Владение +20</option>`;
+  lvlSel.disabled = src === "common";
 
   const charTd = document.createElement("td"); charTd.className = "muted";
   const goalTd = document.createElement("td"); goalTd.className = "goal";
@@ -191,6 +303,7 @@ function addSkillRow(name = "", lvl = "untrained", src = "manual", selectedChoic
   const lvlTd  = document.createElement("td"); lvlTd.appendChild(lvlSel);
   const delTd  = document.createElement("td"); delTd.className = "del";
   delTd.innerHTML = `<button type="button">✕</button>`;
+  delTd.querySelector("button").disabled = src === "common";
   delTd.querySelector("button").onclick = () => {
     const xpCost = Math.max(0, num(tr.dataset.xpCost));
     if (xpCost) {
@@ -210,16 +323,55 @@ function addSkillRow(name = "", lvl = "untrained", src = "manual", selectedChoic
   lvlSel.value = lvl;
   updateSkillHint(sel);
   sel.onchange    = () => {
+    delete tr.dataset.homeworldOriginalLevel;
     const advancementLevel = sel.selectedOptions[0]?.dataset.level;
     if (advancementLevel) lvlSel.value = advancementLevel;
-    updateSkillHint(sel); sheetDirty = true; calcSkillRow(tr); renderSkillPreview(); flashSave();
+    updateSkillHint(sel); syncCommonSkillRows(); sheetDirty = true; calcSkillRow(tr); renderSkillPreview(); flashSave();
   };
-  lvlSel.onchange = () => { sheetDirty = true; calcSkillRow(tr); renderSkillPreview(); flashSave(); };
+  lvlSel.onchange = () => {
+    delete tr.dataset.homeworldOriginalLevel;
+    syncCommonSkillRows(); sheetDirty = true; calcSkillRow(tr); renderSkillPreview(); flashSave();
+  };
   calcSkillRow(tr);
 }
 
+function skillLevelRank(level) {
+  return ({ untrained: 0, basic: 1, trained: 2, mastery: 3 })[level] ?? 0;
+}
+
+function ensureCommonSkillRows() {
+  const existing = new Set($$("#skills-tbody tr[data-src='common']").filter(tr =>
+    tr.querySelector(".sk-lvl")?.value === "basic").map(tr => tr.querySelector(".sk-name")?.value));
+  for (const name of COMMON_SKILLS) {
+    if (!existing.has(name)) addSkillRow(name, "basic", "common");
+  }
+  syncCommonSkillRows();
+}
+
+function visibleSkillRows() {
+  const bestByName = new Map();
+  for (const tr of $("#skills-tbody").rows) {
+    const name = tr.querySelector(".sk-name")?.value;
+    if (!name) continue;
+    const level = tr.querySelector(".sk-lvl")?.value;
+    const previous = bestByName.get(name);
+    if (!previous || skillLevelRank(level) > skillLevelRank(previous.querySelector(".sk-lvl")?.value))
+      bestByName.set(name, tr);
+  }
+  return [...bestByName.values()];
+}
+
+function syncCommonSkillRows() {
+  const bestRows = new Set(visibleSkillRows().filter(tr =>
+    COMMON_SKILLS.has(tr.querySelector(".sk-name")?.value)));
+  for (const tr of $("#skills-tbody").rows) {
+    const name = tr.querySelector(".sk-name")?.value;
+    if (COMMON_SKILLS.has(name)) tr.hidden = tr.dataset.src === "common" || !bestRows.has(tr);
+  }
+}
+
 function updateSkillHint(select) {
-  const hint = skillHintsVisible ? findSkillText(select.value) : "";
+  const hint = skillHintsVisible && !COMMON_SKILLS.has(select.value) ? findSkillText(select.value) : "";
   if (hint) select.title = hint;
   else select.removeAttribute("title");
 }
@@ -242,10 +394,11 @@ function calcSkillRow(tr) {
 }
 
 /* ---------- таланты ---------- */
-function addTalentRow(name = "", note, src = "manual") {
+function addTalentRow(name = "", note, src = "manual", xpCost = 0) {
   const tb = $("#talents-tbody");
   const tr = document.createElement("tr");
   if (src !== "manual") tr.dataset.src = src;
+  tr.dataset.xpCost = String(Math.max(0, num(xpCost)));
 
   const sel = document.createElement("select");
   sel.dataset.key = "tl" + (++uidSeq) + "_n";
@@ -262,22 +415,59 @@ function addTalentRow(name = "", note, src = "manual") {
   const deleteCell = document.createElement("td");
   const del = document.createElement("button"); del.type = "button"; del.className = "skill-delete"; del.textContent = "×";
   del.setAttribute("aria-label", "Удалить талант");
-  del.onclick = () => { tr.remove(); sheetDirty = true; flashSave(); recalc(); };
+  del.onclick = () => {
+    const cost = Math.max(0, num(tr.dataset.xpCost));
+    if (cost) {
+      const xpSpent = num($("input[data-key=xpSpent]").value);
+      $("input[data-key=xpSpent]").value = String(Math.max(0, xpSpent - cost));
+    }
+    tr.remove(); sheetDirty = true; flashSave(); refreshAdvancementSelectors(); recalc();
+  };
   deleteCell.appendChild(del);
   tr.append(nameCell, noteCell, deleteCell);
   tb.appendChild(tr);
 
   if (name) sel.value = name;
   else sel.selectedIndex = 0;   // гарантируем «пусто» даже после истории опций
+  updateTalentHint(sel);
   const summary = findTalentText(name);
   noteEl.value = note === undefined ? summary : note;
   let generatedNote = noteEl.value === summary ? summary : "";
+  let previousName = name;
   sel.onchange = () => {
+    const option = sel.selectedOptions[0];
+    const name = option?.dataset.talentName || "";
+    if (name === previousName) return;
+    const repeatLimit = availableTalentGroups().flatMap(group => group.options)
+      .filter(item => item.name === name)
+      .reduce((limit, item) => Math.max(limit, num(item.repeatLimit) || 0), 0);
+    const copiesElsewhere = Array.from(tb.rows).filter(row =>
+      row !== tr && row.querySelector(".talent-name")?.value === name).length;
+    if (repeatLimit && name && copiesElsewhere >= repeatLimit) {
+      sel.value = previousName;
+      flash(`талант «${name}» можно взять не более ${repeatLimit} раз`);
+      return;
+    }
+    const oldCost = Math.max(0, num(tr.dataset.xpCost));
+    const newCost = Math.max(0, num(option?.dataset.cost));
+    const xpSpent = num($("input[data-key=xpSpent]").value);
+    const spentWithoutRow = Math.max(0, xpSpent - oldCost);
+    const available = Math.max(0, num($("input[data-key=xpTotal]").value) - spentWithoutRow - bioCost());
+    if (newCost > available) {
+      sel.value = previousName;
+      flash(`недостаточно ОО: нужно ${newCost}, доступно ${available}`);
+      return;
+    }
+    $("input[data-key=xpSpent]").value = String(spentWithoutRow + newCost);
+    tr.dataset.xpCost = String(newCost);
+    delete tr.dataset.src;
+    previousName = sel.value;
+    updateTalentHint(sel);
     if (!noteEl.value.trim() || (generatedNote && noteEl.value === generatedNote)) {
       noteEl.value = findTalentText(sel.value);
       generatedNote = noteEl.value;
     }
-    sheetDirty = true; flashSave(); recalc();
+    sheetDirty = true; refreshAdvancementSelectors(); flashSave(); recalc();
   };
   noteEl.oninput = () => {
     if (noteEl.value !== generatedNote) generatedNote = "";
@@ -370,7 +560,7 @@ const lookup = (table, roll) => {
 };
 const rollWounds = () => {
   const world = curWorld();
-  const total = d5() + (world ? world.wounds : 0);
+  const total = d5() + (world ? world.wounds : 0) + toughnessTalentCount();
   $("#state-wounds-total").value = total;
   $("#state-wounds-current").value = total;
   recalc();
@@ -452,21 +642,33 @@ function collect() {
     return rows.join(";");
   };
   data.__skills = packRows($("#skills-tbody"),
-    tr => [tr.children[0].lastChild.value, tr.children[2].firstChild.value, tr.dataset.src || "manual", tr.dataset.xpCost || "0"]);
+    tr => [tr.children[0].lastChild.value,
+      tr.dataset.homeworldOriginalLevel ?? tr.children[2].firstChild.value,
+      tr.dataset.src || "manual", tr.dataset.xpCost || "0"]);
   data.__talents = packRows($("#talents-tbody"),
-    tr => [tr.querySelector(".talent-name").value, tr.querySelector(".talent-note").value, tr.dataset.src || "manual"]);
+    tr => [tr.querySelector(".talent-name").value, tr.querySelector(".talent-note").value, tr.dataset.src || "manual", tr.dataset.xpCost || "0"]);
+  data.__toughBodyCount = $("#talents-tbody").dataset.toughBodyCount || "0";
   data.bioId = $("#sel-bio").value;
   data.__weapons = packRows($("#weapons-tbody"),
     tr => Array.from(tr.children).slice(0, 9).map(td => td.firstChild.value), true);
   data.__gearItems = JSON.stringify(gearItems);
   data.__gearMigrated = "1";
   data.__statsRaw = "1";
+  data.__statModSigned = "1";
   return stripRetiredFields(data);
 }
 
 function apply(data) {
   data = stripRetiredFields(data || {});
+  $("#talents-tbody").dataset.toughBodyCount = String(Math.max(0, num(data.__toughBodyCount)));
   arsenalCart.clear();
+  if (data.__statModSigned !== "1") {
+    for (const c of CHARS) {
+      const key = `statMod_${c.key}`;
+      data[key] = String(-num(data[key]));
+    }
+    data.__statModSigned = "1";
+  }
   if (data.__statsRaw !== "1") {
     const storedWorld = WORLDS.find(world => world.id === data.world);
     for (const c of CHARS) {
@@ -489,13 +691,17 @@ function apply(data) {
       .map(t => t.split("|").map(unescField));
     for (const parts of unpack(data.__skills)) {
       const [name, lvl, src, xpCost] = parts;
-      if (name) addSkillRow(name, lvl || "untrained", ["bio", "career"].includes(src) ? src : "manual", "", xpCost);
+      const level = lvl || "untrained";
+      const source = src === "common" && level !== "basic" ? "manual" :
+        (["bio", "career", "world", "common"].includes(src) ? src : "manual");
+      if (name) addSkillRow(name, level, source, "", xpCost);
     }
+    ensureCommonSkillRows();
     for (const parts of unpack(data.__talents)) {
-      const [name, note, src] = parts;
+      const [name, note, src, xpCost] = parts;
       if (name || note) {
-        const source = ["bio", "career"].includes(src) ? src : "manual";
-        addTalentRow(name, source === "bio" && !note ? findTalentText(name) : (note || ""), source);
+        const source = ["bio", "career", "world"].includes(src) ? src : "manual";
+        addTalentRow(name, source === "bio" && !note ? findTalentText(name) : (note || ""), source, xpCost);
       }
     }
     for (const fields of unpack(data.__weapons)) if (fields.some(Boolean)) addWeaponRow({ name: fields[0], cls: fields[1], dmg: fields[2], dtyp: fields[3], pen: fields[4], rng: fields[5], clip: fields[6], rld: fields[7], spec: fields[8] });
@@ -507,7 +713,8 @@ function apply(data) {
     const dynamic = /^(sk\d|tl\d|w\d|__)/;
     for (const el of $$("[data-key]")) {
       if (dynamic.test(el.dataset.key)) continue;
-      el.value = el.dataset.key.startsWith("adv_") ? "0" : (el.dataset.key === "xpTotal" ? "400" : "");
+      el.value = el.dataset.key.startsWith("adv_") || el.dataset.key.startsWith("statMod_")
+        ? "0" : (el.dataset.key === "xpTotal" ? "400" : "");
     }
     for (const [k, v] of Object.entries(data)) {
       if (dynamic.test(k)) continue;
@@ -515,6 +722,8 @@ function apply(data) {
       const el = document.querySelector(`[data-key="${CSS.escape(k)}"]`);
       if (el) el.value = v;
     }
+    addHomeworldSkillRows(curWorld());
+    addHomeworldTalentRows(curWorld());
     $("input[data-key=xpTotal]").value = data.xpTotal ?? "400";
     if (data.woundsCurrent == null || data.woundsCurrent === "")
       $("#state-wounds-current").value = data.wounds || "0";
@@ -609,6 +818,13 @@ async function loadCharList() {
   }
 }
 
+function hasLegacyCommonSkillUpgrades(data) {
+  return (data?.__skills || "").split(";").some(row => {
+    const [, level, source] = row.split("|");
+    return source === "common" && (level || "untrained") !== "basic";
+  });
+}
+
 async function loadCharacter(id) {
   const wasSuppressingAutosave = suppressAutosave;
   suppressAutosave = true;
@@ -618,7 +834,7 @@ async function loadCharacter(id) {
     if (!r.ok) throw new Error(r.status);
     const rec = await r.json();
     const cleanData = stripRetiredFields(rec.data || {});
-    const needsDataMigration = Object.keys(rec.data || {}).some(key => RETIRED_FIELDS.has(key)) || rec.data?.__gearMigrated !== "1" || rec.data?.__statsRaw !== "1";
+    const needsDataMigration = Object.keys(rec.data || {}).some(key => RETIRED_FIELDS.has(key)) || rec.data?.__gearMigrated !== "1" || rec.data?.__statsRaw !== "1" || rec.data?.__statModSigned !== "1" || hasLegacyCommonSkillUpgrades(rec.data);
     sheetDirty = needsDataMigration;
     isApplying = true;
     apply(cleanData);
@@ -709,7 +925,7 @@ function emptySheetData() {
   for (const el of $$("[data-key]")) {
     const key = el.dataset.key;
     if (/^(sk\d|tl\d|w\d|__)/.test(key)) continue;
-    data[key] = key.startsWith("adv_") ? "0" : "";
+    data[key] = key.startsWith("adv_") || key.startsWith("statMod_") ? "0" : "";
   }
   data.xpTotal = "400";
   data.bioId = "";
@@ -719,6 +935,7 @@ function emptySheetData() {
   data.__gearItems = "[]";
   data.__gearMigrated = "1";
   data.__statsRaw = "1";
+  data.__statModSigned = "1";
   data.woundsCurrent = "";
   data.fatigueCurrent = "0";
   data.status = "";
@@ -728,6 +945,10 @@ function emptySheetData() {
 async function deleteCharacter(id) {
   if (!id) return false;
   const deletingActive = String(id) === String(currentCharId);
+  const charsBeforeDelete = Array.from($("#sheet-switcher").options)
+    .map(option => option.value)
+    .filter(Boolean);
+  const deletedIndex = charsBeforeDelete.indexOf(String(id));
   const prompt = deletingActive
     ? "Устранить персонажа вместе с несохранёнными изменениями?"
     : "Устранить выбранного персонажа?";
@@ -757,11 +978,14 @@ async function deleteCharacter(id) {
 
     const chars = await loadCharList();
     if (!chars) throw new Error("character list unavailable");
-    const lastCharacter = chars[chars.length - 1];
-    if (lastCharacter) {
+    const preferredId = deletedIndex >= 0
+      ? charsBeforeDelete[deletedIndex + 1] || charsBeforeDelete[deletedIndex - 1]
+      : null;
+    const nextCharacter = chars.find(character => String(character.id) === preferredId) || chars[0];
+    if (nextCharacter) {
       sheetDirty = false;
-      if (!await loadCharacter(lastCharacter.id)) throw new Error("last character unavailable");
-      flash("персонаж удалён; открыт последний в списке");
+      if (!await loadCharacter(nextCharacter.id)) throw new Error("next character unavailable");
+      flash("персонаж удалён; открыт следующий в списке");
     } else {
       const data = emptySheetData();
       const create = await fetch(`${API_PREFIX}/characters`, {
@@ -860,6 +1084,45 @@ function findTalentText(name) {
   if (pref) return TALENT_EFFECTS[pref] + ` (вариант: ${name})`;
   return "";
 }
+
+function homeworldTalentNames(world) {
+  if (!world) return [];
+  const features = (world.hwFeatures || []).map(feature => `${feature.n || ""} ${feature.t || ""}`).join(" ").toLocaleLowerCase("ru");
+  return [...new Set(TALENTS.filter(name => features.includes(name.toLocaleLowerCase("ru"))))];
+}
+
+function isRepeatableTalent(name) {
+  return String(name || "").trim().toLocaleLowerCase("ru") === "крепкое телосложение";
+}
+
+function toughnessTalentCount() {
+  return $$("#talents-tbody .talent-name").filter(select => isRepeatableTalent(select.value)).length;
+}
+
+function syncToughBodyWounds() {
+  const tbody = $("#talents-tbody");
+  const previousCount = Math.max(0, num(tbody.dataset.toughBodyCount));
+  const nextCount = toughnessTalentCount();
+  const delta = nextCount - previousCount;
+  if (delta) {
+    const oldMax = Math.max(0, num($("#state-wounds-total").value));
+    const current = Math.max(0, num($("#state-wounds-current").value));
+    const nextMax = Math.max(0, oldMax + delta);
+    $("#state-wounds-total").value = nextMax;
+    $("#state-wounds-current").value = delta > 0 && current === oldMax
+      ? current + delta : Math.min(current, nextMax);
+  }
+  tbody.dataset.toughBodyCount = String(nextCount);
+}
+
+function addHomeworldTalentRows(world) {
+  const existing = new Set($$("#talents-tbody .talent-name").map(select => select.value).filter(Boolean));
+  for (const name of homeworldTalentNames(world)) {
+    if (existing.has(name)) continue;
+    addTalentRow(name, findTalentText(name), "world");
+    existing.add(name);
+  }
+}
 function findSkillText(name) {
   if (!name) return "";
   if (SKILL_TEXTS[name]) return SKILL_TEXTS[name];
@@ -893,12 +1156,17 @@ function buildHint() {
   };
   section("Идентификация", "brief-identity", `${$("#char-name").textContent} · ${$("#char-rank").textContent} · ${$("#char-career").textContent} · ${$("#char-world").textContent} · ${$("#char-age").textContent} · ${$("#char-status").textContent}`);
   section("Характеристики", "brief-stats", CHARS.map(c => `${c.name}: ${$("#val_" + c.key).textContent} · выпало ${$("#roll_" + c.key).textContent} · ${$("#fix_" + c.key).textContent}`));
-  const skills = Array.from($("#skills-tbody").rows).map(tr => {
+  const skills = visibleSkillRows().map(tr => {
     const name = tr.children[0].querySelector("select").value;
     return name ? `${name} · ${tr.children[2].querySelector("select").selectedOptions[0]?.textContent || ""} · цель ${tr.children[3].textContent}` : "";
   }).filter(Boolean);
   section("Умения", "brief-skills", skills);
-  section("Таланты и способности", "brief-talents", Array.from($("#talents-tbody").children).map(row => row.querySelector(".talent-name").value).filter(Boolean));
+  const talents = Array.from($("#talents-tbody").rows).map(row => {
+    const name = row.querySelector(".talent-name").value;
+    const note = row.querySelector(".talent-note").value.trim();
+    return name ? (note ? `${name} · ${note}` : name) : "";
+  }).filter(Boolean);
+  section("Таланты и способности", "brief-talents", talents);
   section("Арсенал и имущество", "brief-gear", Array.from($("#gear-preview-list").children).filter(x => x.classList.contains("item")).map(x => x.textContent.trim()));
   flash("справка обновлена " + new Date().toLocaleTimeString("ru"));
 }
@@ -916,7 +1184,7 @@ function populateBioSelect() {
   if (list.some(b => b.id === selectedId)) sel.value = selectedId;
 }
 
-function availableTalentGroups() {
+function availableTalentGroups(includeGranted = true) {
   const groups = [];
   const addGroup = (label, options) => {
     const sorted = options.filter(item => item.name).sort((a, b) => a.name.localeCompare(b.name, "ru"));
@@ -924,30 +1192,49 @@ function availableTalentGroups() {
   };
   const career = CAREERS.find(item => item.id === $("#sel-career").value);
   const world = curWorld();
+  const ownedCounts = new Map();
+  if (!includeGranted) {
+    for (const tr of $("#talents-tbody").rows) {
+      const name = tr.querySelector(".talent-name")?.value;
+      if (name) ownedCounts.set(name, (ownedCounts.get(name) || 0) + 1);
+    }
+  }
 
   if (world) {
-    const features = (world.hwFeatures || []).map(feature => `${feature.n || ""} ${feature.t || ""}`).join(" ").toLocaleLowerCase("ru");
     addGroup(`Мир · ${world.name}`,
-      TALENTS.filter(name => features.includes(name.toLocaleLowerCase("ru"))).map(name => ({ name, cost: 0 })));
+      homeworldTalentNames(world).filter(name =>
+        (includeGranted || !ownedCounts.has(name)))
+        .map(name => ({ name, cost: 0, src: "world" })));
   }
 
   if (career) {
-    addGroup(`Стартовый набор · ${career.name}`,
-      careerPackage(career).talents.flat().map(name => ({ name, cost: 0 })));
+    if (includeGranted) {
+      addGroup(`Стартовый набор · ${career.name}`,
+        careerPackage(career).talents.flat().map(name => ({ name, cost: 0 })));
 
-    const bio = curBio();
-    if (bio && (!world || !bio.worlds?.length || bio.worlds.includes(world.id)))
-      addGroup(`Биография · ${bio.name} (${bio.cost} ОО)`, (bio.talents || []).map(name => ({ name, cost: 0 })));
+      const bio = curBio();
+      if (bio && (!world || !bio.worlds?.length || bio.worlds.includes(world.id)))
+        addGroup(`Биография · ${bio.name} (${bio.cost} ОО)`, (bio.talents || []).map(name => ({ name, cost: 0 })));
+    }
 
     const ranks = CAREER_ADVANCEMENTS
       .filter(item => item.career === career.id && (!world || item.worlds.includes(world.id)))
       .sort((a, b) => a.minXp - b.minXp);
     const selectedRank = ranks.find(item => item.rank === $("#profile-rank").value);
     if (selectedRank) {
-      for (const rank of ranks.filter(item => item.minXp <= selectedRank.minXp)) {
+      const eligibleRanks = ranks.filter(item => item.minXp <= selectedRank.minXp);
+      const repeatLimits = new Map();
+      for (const item of eligibleRanks.flatMap(rank => rank.advancements || []).filter(item => item.type === "talent")) {
+        repeatLimits.set(item.name, Math.max(repeatLimits.get(item.name) || 1, num(item.repeatLimit) || 1));
+      }
+      for (const rank of eligibleRanks) {
+        const advancements = (rank.advancements || []).filter(item => item.type === "talent");
         addGroup(`Ранг · ${rank.rank}`,
-          (rank.advancements || []).filter(item => item.type === "talent")
-            .map(item => ({ name: item.name, cost: item.cost, requirements: item.requirements || "" })));
+          advancements
+            .filter(item => includeGranted || (isRepeatableTalent(item.name)
+              ? (ownedCounts.get(item.name) || 0) < (repeatLimits.get(item.name) || 1)
+              : !ownedCounts.has(item.name)))
+            .map(item => ({ name: item.name, cost: item.cost, requirements: item.requirements || "", repeatLimit: repeatLimits.get(item.name) })));
       }
     }
   }
@@ -956,11 +1243,11 @@ function availableTalentGroups() {
 }
 
 function skillMeta(name) {
-  const known = SKILLS.find(skill => skill.name === name);
+  const known = SKILLS_BY_NAME.get(name);
   if (known) return known;
   const match = name.match(/^(.+?)\s*\((.+)\)$/);
   const base = match ? `${match[1].trim()}*` : name;
-  const template = SKILL_LIST.find(item => item[0] === base || item[0] === base.replace("*", ""));
+  const template = SKILL_TEMPLATES_BY_NAME.get(base) || SKILL_TEMPLATES_BY_NAME.get(base.replace("*", ""));
   return { name, type: template?.[1] || "a", char: template?.[2] || "int" };
 }
 
@@ -971,7 +1258,7 @@ function skillAdvancementOption(item) {
     displayName: item.name,
     cost: item.cost,
     requirements: item.requirements || "",
-    level: match ? (match[2] === "+10" ? "trained" : "mastery") : "",
+    level: match ? (match[2] === "+10" ? "trained" : "mastery") : "untrained",
   };
 }
 
@@ -981,37 +1268,104 @@ function normalizeHomeworldSkill(value) {
   return suffix && CHARS.some(char => char.abbr === suffix[1]) ? name.slice(0, suffix.index).trim() : name;
 }
 
-function availableSkillGroups() {
+function clearHomeworldSkillRows() {
+  for (const tr of $$("#skills-tbody tr[data-homeworld-original-level]")) {
+    tr.querySelector(".sk-lvl").value = tr.dataset.homeworldOriginalLevel;
+    delete tr.dataset.homeworldOriginalLevel;
+    calcSkillRow(tr);
+  }
+  for (const tr of $$("#skills-tbody tr[data-src='world']")) tr.remove();
+}
+
+function addHomeworldSkillRows(world) {
+  if (!world) return;
+  const existing = new Map();
+  for (const tr of $$("#skills-tbody tr")) {
+    const name = tr.querySelector(".sk-name")?.value;
+    if (name) existing.set(name, [...(existing.get(name) || []), tr]);
+  }
+  const entries = [
+    ...(world.hwSkills || []).map(value => ({ name: normalizeHomeworldSkill(value), level: "untrained" })),
+    ...(world.hwSkillBasic || []).map(value => ({ name: normalizeHomeworldSkill(value), level: "basic" })),
+  ];
+  for (const { name, level } of entries) {
+    if (!name) continue;
+    let rows = existing.get(name);
+    if (rows?.length) {
+      const retained = rows.find(row => row.dataset.src !== "bio") || rows[0];
+      for (const duplicate of rows) {
+        if (duplicate !== retained && duplicate.dataset.src === "bio") duplicate.remove();
+      }
+      rows = rows.filter(row => row === retained || row.dataset.src !== "bio");
+      existing.set(name, rows);
+      if (level === "basic") {
+        for (const row of rows) {
+          const levelSelect = row.querySelector(".sk-lvl");
+          if (levelSelect?.value !== "untrained") continue;
+          if (row.dataset.src !== "world") row.dataset.homeworldOriginalLevel = levelSelect.value;
+          levelSelect.value = "basic";
+          calcSkillRow(row);
+        }
+      }
+      continue;
+    }
+    addSkillRow(name, level, "world");
+    existing.set(name, [$("#skills-tbody").lastElementChild]);
+  }
+}
+
+function availableSkillGroups(includeGranted = true, splitByType = true) {
   const groups = [];
   const addGroup = (label, skills) => {
-    for (const type of ["b", "a"]) {
+    const types = splitByType ? ["b", "a"] : [""];
+    for (const type of types) {
       const unique = new Map();
       for (const item of skills) {
         if (!item.name) continue;
         const meta = skillMeta(item.name);
-        if (meta.type !== type) continue;
+        const groupType = item.level === "basic" ? "b" : meta.type;
+        if (type && groupType !== type) continue;
         unique.set(`${item.name}\u0000${item.displayName || item.name}\u0000${item.cost ?? 0}\u0000${item.level || ""}`,
           { ...meta, ...item, cost: item.cost ?? 0 });
       }
-      const options = [...unique.values()].sort((a, b) => a.name.localeCompare(b.name, "ru"));
+      const options = [...unique.values()].sort((a, b) =>
+        (a.displayName || a.name).localeCompare(b.displayName || b.name, "ru", { sensitivity: "base" }));
       if (options.length)
-        groups.push({ label: `${label} · ${type === "b" ? "Базовые" : "Продвинутые"}`, options });
+        groups.push({ label: splitByType ? `${label} · ${type === "b" ? "Базовые" : "Продвинутые"}` : label, options });
     }
   };
 
   const career = CAREERS.find(item => item.id === $("#sel-career").value);
   const world = curWorld();
-  if (world) addGroup(`Мир · ${world.name}`,
-    (world.hwSkills || []).map(value => ({ name: normalizeHomeworldSkill(value), cost: 0 })));
+  const ownedSkillRanks = new Map();
+  if (!includeGranted) {
+    for (const tr of $("#skills-tbody").rows) {
+      const name = tr.querySelector(".sk-name")?.value;
+      if (!name) continue;
+      const rank = skillLevelRank(tr.querySelector(".sk-lvl")?.value);
+      ownedSkillRanks.set(name, Math.max(rank, ownedSkillRanks.get(name) ?? -1));
+    }
+  }
+  if (world) {
+    const worldSkills = [
+      ...(world.hwSkills || []).map(value => ({ name: normalizeHomeworldSkill(value), cost: 0 })),
+      ...(world.hwSkillBasic || []).map(value => ({ name: normalizeHomeworldSkill(value), cost: 0, level: "basic" })),
+    ];
+    if (includeGranted) addGroup(`Мир · ${world.name}`, worldSkills);
+  }
 
   if (career) {
-    addGroup(`Стартовый набор · ${career.name}`,
-      careerPackage(career).skills.flat().map(name => ({ name, cost: 0 })));
+    const careerSkills = careerPackage(career).skills.flat();
+    if (includeGranted) {
+      addGroup(`Стартовый набор · ${career.name}`,
+        careerSkills.map(name => ({ name, cost: 0 })));
 
-    const bio = curBio();
-    if (bio && (!world || !bio.worlds?.length || bio.worlds.includes(world.id)))
-      addGroup(`Биография · ${bio.name} (${bio.cost} ОО)`,
-        [...(bio.skills || []), ...(bio.skillBasic || [])].map(name => ({ name, cost: 0 })));
+      const bio = curBio();
+      if (bio && (!world || !bio.worlds?.length || bio.worlds.includes(world.id))) {
+        addGroup(`Биография · ${bio.name} (${bio.cost} ОО)`,
+          [...(bio.skills || []), ...(bio.skillBasic || [])].map(name => ({ name, cost: 0 })));
+      }
+    }
 
     const ranks = CAREER_ADVANCEMENTS
       .filter(item => item.career === career.id && (!world || item.worlds.includes(world.id)))
@@ -1021,7 +1375,8 @@ function availableSkillGroups() {
       for (const rank of ranks.filter(item => item.minXp <= selectedRank.minXp))
         addGroup(`Ранг · ${rank.rank}`,
           (rank.advancements || []).filter(item => item.type === "skill")
-            .map(skillAdvancementOption));
+            .map(skillAdvancementOption)
+            .filter(item => includeGranted || skillLevelRank(item.level) > (ownedSkillRanks.get(item.name) ?? -1)));
     }
   }
 
@@ -1070,7 +1425,7 @@ function refreshSkillSelectors() {
   const available = new Set(availableSkillNames(groups));
   const addSelect = $("#skill-add-name");
   if (addSelect) {
-    populateSkillSelect(addSelect, groups, "— выбери навык —", "", false, true);
+    populateSkillSelect(addSelect, availableSkillGroups(false, false), "— выбери навык —", "", false, true);
   }
   for (const select of $$(".sk-name")) {
     const selected = select.value;
@@ -1091,10 +1446,13 @@ function populateTalentSelect(select, groups, placeholder, selected = "", preser
     optgroup.label = group.label;
     for (const [itemIndex, item] of group.options.entries()) {
       const requirements = item.requirements ? ` · Требования: ${item.requirements}` : "";
-      const option = new Option(`${item.name} (${item.cost ?? 0} ОО)${requirements}`,
+      const repeat = item.repeatLimit ? ` · до ${item.repeatLimit} раз` : "";
+      const option = new Option(`${item.name}${repeat} (${item.cost ?? 0} ОО)${requirements}`,
         uniqueValues ? `talent-${groupIndex}-${itemIndex}` : item.name);
       option.dataset.talentName = item.name;
       option.dataset.cost = String(item.cost ?? 0);
+      if (item.repeatLimit) option.dataset.repeatLimit = String(item.repeatLimit);
+      if (item.src) option.dataset.src = item.src;
       optgroup.appendChild(option);
       available.add(item.name);
     }
@@ -1110,7 +1468,7 @@ function refreshAdvancementSelectors() {
   const available = new Set(availableTalentNames(groups));
   const addSelect = $("#talent-add-name");
   if (addSelect) {
-    populateTalentSelect(addSelect, groups, "— выбери талант —", "", false, true);
+    populateTalentSelect(addSelect, availableTalentGroups(false), "— выбери талант —", "", false, true);
   }
 
   for (const select of $$(".talent-name")) {
@@ -1387,11 +1745,15 @@ function applyCareerPackage(career, selections = null) {
   // Переключение профессии заменяет только автоматически выданные строки.
   for (const tr of $$("#skills-tbody tr[data-src='career'], #talents-tbody tr[data-src='career']")) tr.remove();
   gearItems = gearItems.filter(item => item.source !== "career");
+  // Если умение мира совпадало с удалённым умением профессии, восстановить его
+  // как выданное миром до проверки дубликатов в новом стартовом наборе.
+  addHomeworldSkillRows(curWorld());
+  addHomeworldTalentRows(curWorld());
   if (!career) return;
 
   const pack = careerPackage(career);
   const choices = selections || { skills: [], talents: [], gear: [] };
-  const existingSkills = new Set($$("#skills-tbody .sk-name").map(select => select.value).filter(Boolean));
+  const existingSkills = new Set($$("#skills-tbody tr[data-src='career'] .sk-name").map(select => select.value).filter(Boolean));
   const existingTalents = new Set($$("#talents-tbody .talent-name").map(select => select.value).filter(Boolean));
   const existingGear = new Set(gearItems.flatMap(item => [item.catalogId, normalizeArmoryName(item.name)]).filter(Boolean));
   for (const [index, options] of pack.skills.entries()) {
@@ -1428,6 +1790,8 @@ function applyCareerPackage(career, selections = null) {
 function clearBioRows() {
   for (const tr of $$("#skills-tbody tr[data-src='bio']")) tr.remove();
   for (const tr of $$("#talents-tbody [data-src='bio']")) tr.remove();
+  addHomeworldSkillRows(curWorld());
+  addHomeworldTalentRows(curWorld());
 }
 
 /* добавить строки по id биографии;
@@ -1436,13 +1800,27 @@ function addBioRows(id, skipExisting = false) {
   const bio = BIOGRAPHIES.find(b => b.id === id);
   if (!bio) return;
   const existing = new Set();
+  const existingSkills = new Set($$("#skills-tbody tr[data-src='bio'] .sk-name").map(select => select.value).filter(Boolean));
+  const existingTalents = new Set($$("#talents-tbody .talent-name").map(select => select.value).filter(Boolean));
   if (skipExisting) {
     for (const tr of $$("#skills-tbody tr[data-src='bio']")) existing.add(tr.children[0].lastChild.value);
     for (const tr of $$("#talents-tbody [data-src='bio']")) existing.add(tr.querySelector(".talent-name").value);
   }
-  for (const s of (bio.skills || [])) if (!skipExisting || !existing.has(s)) addSkillRow(s, "untrained", "bio");
-  for (const s of (bio.skillBasic || [])) if (!skipExisting || !existing.has(s)) addSkillRow(s, "basic", "bio");
-  for (const t of (bio.talents || [])) if (!skipExisting || !existing.has(t)) addTalentRow(t, findTalentText(t), "bio");
+  for (const s of (bio.skills || [])) {
+    if (existingSkills.has(s) || (skipExisting && existing.has(s))) continue;
+    addSkillRow(s, "untrained", "bio");
+    existingSkills.add(s);
+  }
+  for (const s of (bio.skillBasic || [])) {
+    if (existingSkills.has(s) || (skipExisting && existing.has(s))) continue;
+    addSkillRow(s, "basic", "bio");
+    existingSkills.add(s);
+  }
+  for (const t of (bio.talents || [])) {
+    if (existingTalents.has(t) || (skipExisting && existing.has(t))) continue;
+    addTalentRow(t, findTalentText(t), "bio");
+    existingTalents.add(t);
+  }
 }
 
 function onCareerChange() {
@@ -1462,7 +1840,10 @@ function onCareerChange() {
   updateBioStatus();
   applyCareerPackage(CAREERS.find(item => item.id === careerId));
   renderCareerPreview();
+  renderSkillPreview();
   showCareerKit(true);
+  renderCharacteristicAdvancements();
+  recalc();
   sheetDirty = true;
   flashSave();
 }
@@ -1530,22 +1911,24 @@ function setTalentMode(managing) {
 }
 
 function renderSkillPreview() {
-  const basicRoot = $("#skill-preview-basic"), trainedRoot = $("#skill-preview-trained");
+  syncCommonSkillRows();
+  const basicRoot = $("#skill-preview-basic"), commonRoot = $("#skill-preview-common"), trainedRoot = $("#skill-preview-trained");
   basicRoot.replaceChildren();
+  commonRoot.replaceChildren();
   trainedRoot.replaceChildren();
   let count = 0;
-  for (const tr of $("#skills-tbody").rows) {
+  for (const tr of visibleSkillRows()) {
     const nameSelect = tr.children[0].querySelector("select");
     const levelSelect = tr.children[2].querySelector("select");
     const name = nameSelect.value;
     if (!name) continue;
     count++;
     const level = levelSelect.value;
-    const targetRoot = level === "basic" ? basicRoot : trainedRoot;
+    const targetRoot = COMMON_SKILLS.has(name) ? commonRoot : (level === "basic" ? basicRoot : trainedRoot);
     const item = document.createElement("div"); item.className = "skill-preview";
     const meta = document.createElement("div"); meta.className = "skill-preview-meta";
     const title = document.createElement("span"); title.textContent = name;
-    const description = skillHintsVisible ? findSkillText(name) : "";
+    const description = skillHintsVisible && !COMMON_SKILLS.has(name) ? findSkillText(name) : "";
     if (description) title.title = description;
     const levelLabel = document.createElement("small"); levelLabel.textContent = levelSelect.selectedOptions[0]?.textContent || "";
     meta.append(title, levelLabel);
@@ -1564,6 +1947,7 @@ function renderSkillPreview() {
   }
   $("#skill-count").textContent = String(count);
   if (!basicRoot.children.length) basicRoot.innerHTML = '<p class="skill-empty">Нет базовых навыков.</p>';
+  if (!commonRoot.children.length) commonRoot.innerHTML = '<p class="skill-empty">Нет общих навыков.</p>';
   if (!trainedRoot.children.length) trainedRoot.innerHTML = '<p class="skill-empty">Нет обученных навыков.</p>';
 }
 
@@ -1578,19 +1962,43 @@ function toggleSkillHints() {
   renderSkillPreview();
 }
 
+function updateTalentHint(select) {
+  const hint = talentHintsVisible ? findTalentText(select.value) : "";
+  if (hint) select.title = hint;
+  else select.removeAttribute("title");
+}
+
+function toggleTalentHints() {
+  talentHintsVisible = !talentHintsVisible;
+  const label = talentHintsVisible ? "Скрыть подсказки" : "Показать подсказки";
+  for (const button of [$("#btn-talent-hints"), $("#btn-talent-hints-manage")]) {
+    button.textContent = label;
+    button.setAttribute("aria-label", label);
+  }
+  for (const select of $$("#talents-tbody .talent-name")) updateTalentHint(select);
+  renderTalentPreview();
+}
+
 function renderTalentPreview() {
   const root = $("#talent-preview-list");
   root.replaceChildren();
+  let count = 0;
   for (const tr of $("#talents-tbody").rows) {
     const name = tr.querySelector(".talent-name").value;
     if (!name) continue;
+    count++;
     const item = document.createElement("div"); item.className = "talent-row";
     const title = document.createElement("span"); title.textContent = name;
+    const hint = findTalentText(name);
+    if (talentHintsVisible && hint) title.title = hint;
     const note = tr.querySelector(".talent-note").value.trim();
     item.appendChild(title);
-    if (note) { const summary = document.createElement("small"); summary.textContent = note; item.appendChild(summary); }
+    if (note && (talentHintsVisible || note !== hint)) {
+      const summary = document.createElement("small"); summary.textContent = note; item.appendChild(summary);
+    }
     root.appendChild(item);
   }
+  $("#talent-count").textContent = String(count);
   if (!root.children.length) root.innerHTML = '<p class="skill-empty">Таланты не добавлены.</p>';
 }
 
@@ -2287,7 +2695,7 @@ async function loadReferenceData() {
   if (!response.ok) throw new Error("Не удалось загрузить игровые справочники. Проверь сервер и повтори вход.");
   const data = await response.json();
   const required = [
-    "worlds", "chars", "careers", "skill_list", "skill_groups", "skill_texts",
+    "worlds", "chars", "careers", "characteristic_advancements", "common_skills", "skill_list", "skill_groups", "skill_texts",
     "biographies", "career_advancements", "talents", "sanctions", "carry_table", "talent_effects", "armory_catalog",
   ];
   if (required.some(key => data[key] == null)) {
@@ -2298,6 +2706,8 @@ async function loadReferenceData() {
   CHARS = data.chars;
   CAREERS = data.careers;
   CAREER_ADVANCEMENTS = data.career_advancements;
+  CHARACTERISTIC_ADVANCEMENTS = data.characteristic_advancements;
+  COMMON_SKILLS = new Set(data.common_skills);
   SKILL_LIST = data.skill_list;
   SKILL_GROUPS = data.skill_groups;
   SKILL_TEXTS = data.skill_texts;
@@ -2316,6 +2726,12 @@ async function loadReferenceData() {
     } else SKILLS.push({ name, type, char });
   }
   SKILLS.sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  SKILLS_BY_NAME = new Map(SKILLS.map(skill => [skill.name, skill]));
+  SKILL_TEMPLATES_BY_NAME = new Map();
+  for (const item of SKILL_LIST) {
+    SKILL_TEMPLATES_BY_NAME.set(item[0], item);
+    SKILL_TEMPLATES_BY_NAME.set(item[0].replace("*", ""), item);
+  }
 }
 
 async function init() {
@@ -2326,16 +2742,23 @@ async function init() {
   refreshAdvancementSelectors();
 
   $("#sel-world").addEventListener("change", () => {
+    clearHomeworldSkillRows();
+    addHomeworldSkillRows(curWorld());
+    for (const tr of $$("#talents-tbody tr[data-src='world']")) tr.remove();
+    addHomeworldTalentRows(curWorld());
+    refreshAdvancementSelectors();
     const bio = curBio();
     if (bio && bio.worlds?.length && !bio.worlds.includes($("#sel-world").value)) {
       clearBioRows();
       $("#sel-bio").value = "";
       $("#sel-bio").dataset.prev = "";
-    }
+    } else if (bio) addBioRows(bio.id, true);
     populateBioSelect();
     updateBioStatus();
     showCareerKit(false);
     renderCareerPreview();
+    renderSkillPreview();
+    recalc();
     sheetDirty = true; flashSave();
   });
   $("#sel-career").addEventListener("change", onCareerChange);
@@ -2344,6 +2767,11 @@ async function init() {
   $("#btn-edit-chars").addEventListener("click", () => {
     setCharEditMode(!charEditMode);
     recalc();
+  });
+  $("#characteristic-advancement-rows").addEventListener("click", event => {
+    const button = event.target.closest("[data-characteristic-advancement]");
+    if (button && !button.disabled)
+      changeCharacteristicAdvancement(button.dataset.characteristicAdvancement, button.dataset.action);
   });
   $("#btn-print").addEventListener("click", () => window.print());
   $("#btn-hint").addEventListener("click", buildHint);
@@ -2378,6 +2806,8 @@ async function init() {
   $("#btn-skill-hints-manage").addEventListener("click", toggleSkillHints);
   $("#btn-talent-manage").addEventListener("click", () => setTalentMode(true));
   $("#btn-talent-overview").addEventListener("click", () => setTalentMode(false));
+  $("#btn-talent-hints").addEventListener("click", toggleTalentHints);
+  $("#btn-talent-hints-manage").addEventListener("click", toggleTalentHints);
   $("#skill-add-form").addEventListener("submit", event => {
     event.preventDefault();
     const selectedOption = $("#skill-add-name").selectedOptions[0];
@@ -2390,18 +2820,26 @@ async function init() {
     sheetDirty = true; recalc(); flashSave();
   });
   $("#skill-add-name").addEventListener("change", event => {
-    const advancementLevel = event.currentTarget.selectedOptions[0]?.dataset.level;
-    if (advancementLevel) $("#skill-add-level").value = advancementLevel;
+    const selectedOption = event.currentTarget.selectedOptions[0];
+    if (selectedOption?.value) $("#skill-add-level").value = selectedOption.dataset.level || "untrained";
   });
   $("#talent-add-form").addEventListener("submit", event => {
     event.preventDefault();
     const selectedOption = $("#talent-add-name").selectedOptions[0];
     const name = selectedOption?.dataset.talentName || "";
     if (!name) { $("#talent-message").textContent = "Сначала выбери талант."; return; }
+    const repeatLimit = num(selectedOption.dataset.repeatLimit);
+    const copies = $$("#talents-tbody .talent-name").filter(select => select.value === name).length;
+    if (repeatLimit && copies >= repeatLimit) {
+      $("#talent-message").textContent = `талант «${name}» можно взять не более ${repeatLimit} раз`;
+      refreshAdvancementSelectors();
+      return;
+    }
     if (!chargeAdvancementXP(selectedOption, $("#talent-message"))) return;
-    addTalentRow(name, $("#talent-add-note").value.trim() || undefined);
+    addTalentRow(name, $("#talent-add-note").value.trim() || undefined,
+      selectedOption.dataset.src || "manual", selectedOption.dataset.cost);
     event.currentTarget.reset(); $("#talent-message").textContent = "";
-    sheetDirty = true; recalc(); flashSave();
+    sheetDirty = true; refreshAdvancementSelectors(); recalc(); flashSave();
   });
   $("#btn-gear-manage").addEventListener("click", () => setGearMode(true));
   $("#btn-gear-overview").addEventListener("click", () => setGearMode(false));
@@ -2440,9 +2878,13 @@ async function init() {
   }
 
   document.addEventListener("input", event => {
-    const statKey = event.target.dataset.statEdit;
+    const statKey = event.target.dataset.statCurrent;
     if (statKey) {
-      $(`input[data-key="base_${statKey}"]`).value = event.target.value;
+      if (event.target.value === "") return;
+      const world = curWorld();
+      const unmodifiedValue = getVal(statKey) + (world ? world.mods[statKey] : 0) +
+        charFixes(statKey).reduce((sum, fix) => sum + fix.v, 0);
+      $(`input[data-key="statMod_${statKey}"]`).value = String(num(event.target.value) - unmodifiedValue);
       sheetDirty = true; recalc(); flashSave();
       return;
     }
@@ -2452,6 +2894,9 @@ async function init() {
     }
     if (!event.target.matches("[data-key]")) return;
     sheetDirty = true; recalc(); flashSave();
+  });
+  document.addEventListener("change", event => {
+    if (event.target.dataset.statCurrent && event.target.value === "") recalc();
   });
 
   const initialChars = await loadCharList();
@@ -2472,6 +2917,7 @@ async function init() {
       const saved = localStorage.getItem(LS_SHEET_KEY);
       if (saved) {
         const data = stripRetiredFields(JSON.parse(saved));
+        const needsDataMigration = data.__gearMigrated !== "1" || data.__statsRaw !== "1" || data.__statModSigned !== "1" || hasLegacyCommonSkillUpgrades(data);
         const response = await fetch(`${API_PREFIX}/characters`, {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
         });
@@ -2480,7 +2926,7 @@ async function init() {
           currentCharId = String(record.id);
           try { localStorage.setItem(activeCharStorageKey(), currentCharId); } catch (e) {}
           apply(data); await loadCharList(); $("#sheet-switcher").value = currentCharId;
-          sheetDirty = data.__gearMigrated !== "1" || data.__statsRaw !== "1";
+          sheetDirty = needsDataMigration;
           restored = true; localStorage.setItem(LS_MIGRATED_KEY, "1");
           flash("миграция из локального хранилища");
           if (sheetDirty) flashSave();
@@ -2495,6 +2941,7 @@ async function init() {
   populateBioSelect();
   if (restoredBio) $("#sel-bio").value = restoredBio;
   updateBioStatus();
+  ensureCommonSkillRows();
   recalc();
 }
 
