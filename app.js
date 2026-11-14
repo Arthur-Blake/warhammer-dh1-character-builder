@@ -97,7 +97,7 @@ function fixNumbers(key) {
   const specialModifier = num($(`input[data-key="statMod_${key}"]`)?.value);
   if (specialModifier) parts.push(fmtMod(specialModifier));
   const advancementBonus = characteristicAdvancementCount(key) * 5;
-  if (advancementBonus) parts.push(`${fmtMod(advancementBonus)} улучш.`);
+  if (advancementBonus) parts.push(fmtMod(advancementBonus));
   return parts.join(" ");
 }
 
@@ -255,7 +255,7 @@ function recalc() {
   const xpFree = Math.max(0, num($("input[data-key=xpTotal]").value) - num($("input[data-key=xpSpent]").value) - bioCost);
   $("#xp-available").textContent = xpFree;
   $("#xp-total-input").value = $("input[data-key=xpTotal]").value || "400";
-  $("#xp-spent-input").value = $("input[data-key=xpSpent]").value || "0";
+  $("#xp-spent-input").value = String(num($("input[data-key=xpSpent]").value) + bioCost);
 
   for (const tr of $("#skills-tbody").rows) calcSkillRow(tr);
   renderSkillPreview();
@@ -2854,6 +2854,7 @@ async function init() {
   });
   $("#btn-xp-save").addEventListener("click", () => {
     const details = $("#xp-total-input").closest("details"); if (details) details.open = false;
+    $("input[data-key=xpSpent]").value = String(Math.max(0, num($("#xp-spent-input").value) - bioCost()));
     sheetDirty = true; recalc(); flashSave();
   });
   $("#btn-wealth-save").addEventListener("click", saveWealth);
