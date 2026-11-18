@@ -240,7 +240,7 @@ function recalc() {
     $("#fix_" + c.key).textContent = charEditMode ? fixBreakdown(c.key) : fixNumbers(c.key);
     const card = $(`[data-stat="${c.key}"]`);
     const editInput = $("#edit_" + c.key);
-    const editValue = charEditMode ? v : baseValue;
+    const editValue = baseValue;
     if (editInput.value !== String(editValue)) editInput.value = editValue;
     editInput.hidden = !charEditMode;
     card.classList.toggle("modifier-positive", specialModifier > 0);
@@ -2908,20 +2908,16 @@ async function init() {
     const statKey = event.target.dataset.statCurrent;
     if (statKey) {
       if (event.target.value === "") return;
-      const modifierInput = $(`input[data-key="statMod_${statKey}"]`);
       if (event.target.dataset.statSpinner === "true") {
+        const modifierInput = $(`input[data-key="statMod_${statKey}"]`);
         const delta = num(event.target.value) - num(event.target.dataset.statSpinnerValue);
         if (delta) modifierInput.value = String(num(modifierInput.value) + delta);
-        event.target.dataset.statSpinnerValue = event.target.value;
       } else {
-        const world = curWorld();
-        const advancement = num($(`input[data-key="adv_${statKey}"]`).value) + characteristicAdvancementCount(statKey) * 5;
-        const modifier = num(modifierInput.value);
-        const worldBonus = world ? world.mods[statKey] : 0;
-        const fixedBonus = charFixes(statKey).reduce((sum, fix) => sum + fix.v, 0);
-        $(`input[data-key="base_${statKey}"]`).value = String(num(event.target.value) - advancement - modifier - worldBonus - fixedBonus);
+        $(`input[data-key="base_${statKey}"]`).value = event.target.value;
       }
       sheetDirty = true; recalc(); flashSave();
+      if (event.target.dataset.statSpinner === "true")
+        event.target.dataset.statSpinnerValue = event.target.value;
       return;
     }
     if (event.target.matches(".armor-zone input") && event.target.value !== "") {
