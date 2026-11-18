@@ -111,7 +111,7 @@ function buildChars() {
     card.dataset.stat = c.key;
     card.innerHTML =
       `<label>${c.name}</label><strong id="val_${c.key}">—</strong>` +
-      `<input class="stat-edit-input" id="edit_${c.key}" data-stat-current="${c.key}" type="number" inputmode="numeric" step="1" placeholder="—" aria-label="Текущее значение: ${c.name}. Стрелками меняется мод, база не меняется" title="Стрелки меняют мод; база остаётся неизменной" hidden>` +
+      `<input class="stat-edit-input" id="edit_${c.key}" data-stat-current="${c.key}" type="number" inputmode="numeric" step="1" placeholder="—" aria-label="Текущее значение: ${c.name}. Стрелки меняют модификатор" title="Ввод меняет базовое значение; стрелки — модификатор" hidden>` +
       `<small><span id="roll_${c.key}">—</span><span id="stat-separator_${c.key}"> </span><span id="fix_${c.key}"></span></small>`;
     const modifier = document.createElement("input");
     modifier.type = "hidden";
@@ -2878,14 +2878,49 @@ async function init() {
     $(`[data-note-more="${key}"]`).addEventListener("click", () => toggleNoteExpanded(key));
   }
 
+  document.addEventListener("pointerdown", event => {
+    const input = event.target.closest("[data-stat-current]");
+    if (!input) return;
+    const rect = input.getBoundingClientRect();
+    if (event.clientX >= rect.right - 22) {
+      input.dataset.statSpinner = "true";
+      input.dataset.statSpinnerValue = input.value;
+    }
+  }, true);
+  const clearStatSpinner = () => {
+    setTimeout(() => $$('[data-stat-spinner="true"]').forEach(input => {
+      delete input.dataset.statSpinner;
+      delete input.dataset.statSpinnerValue;
+    }), 0);
+  };
+  document.addEventListener("pointerup", clearStatSpinner, true);
+  document.addEventListener("pointercancel", clearStatSpinner, true);
+  document.addEventListener("keydown", event => {
+    const input = event.target.closest("[data-stat-current]");
+    if (!input || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
+    event.preventDefault();
+    const key = input.dataset.statCurrent;
+    const modifier = $(`input[data-key="statMod_${key}"]`);
+    modifier.value = String(num(modifier.value) + (event.key === "ArrowUp" ? 1 : -1));
+    sheetDirty = true; recalc(); flashSave();
+  });
   document.addEventListener("input", event => {
     const statKey = event.target.dataset.statCurrent;
     if (statKey) {
       if (event.target.value === "") return;
-      const world = curWorld();
-      const unmodifiedValue = getVal(statKey) + (world ? world.mods[statKey] : 0) +
-        charFixes(statKey).reduce((sum, fix) => sum + fix.v, 0);
-      $(`input[data-key="statMod_${statKey}"]`).value = String(num(event.target.value) - unmodifiedValue);
+      const modifierInput = $(`input[data-key="statMod_${statKey}"]`);
+      if (event.target.dataset.statSpinner === "true") {
+        const delta = num(event.target.value) - num(event.target.dataset.statSpinnerValue);
+        if (delta) modifierInput.value = String(num(modifierInput.value) + delta);
+        event.target.dataset.statSpinnerValue = event.target.value;
+      } else {
+        const world = curWorld();
+        const advancement = num($(`input[data-key="adv_${statKey}"]`).value) + characteristicAdvancementCount(statKey) * 5;
+        const modifier = num(modifierInput.value);
+        const worldBonus = world ? world.mods[statKey] : 0;
+        const fixedBonus = charFixes(statKey).reduce((sum, fix) => sum + fix.v, 0);
+        $(`input[data-key="base_${statKey}"]`).value = String(num(event.target.value) - advancement - modifier - worldBonus - fixedBonus);
+      }
       sheetDirty = true; recalc(); flashSave();
       return;
     }
